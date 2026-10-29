@@ -1,4 +1,4 @@
-# Install with: opengrader-providers add --example gemini
+# Install with: opengrader providers add --example gemini
 #
 # The Gemini Developer API is reached through the optional "pydantic-ai"
 # backend (dialect = "pydantic-ai") rather than one of the three raw-HTTP

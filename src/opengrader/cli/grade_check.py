@@ -20,10 +20,10 @@ from opengrader.core.release import (
 EPILOG = """\
 \b
 Examples:
-  uv run grade-check --submissions out/student-submissions/
-  uv run grade-check --submissions out/student-submissions/ --roster roster.txt
-  uv run grade-check --submissions out/student-submissions/ --json
-  uv run grade-check --submissions out/student-submissions/ --fail-on-blocking
+  opengrader grade-check --submissions out/student-submissions/
+  opengrader grade-check --submissions out/student-submissions/ --roster roster.txt
+  opengrader grade-check --submissions out/student-submissions/ --json
+  opengrader grade-check --submissions out/student-submissions/ --fail-on-blocking
 
 \b
 What the severities mean:
@@ -106,7 +106,7 @@ def print_readiness(context: ReleaseContext) -> None:
     else:
         print(
             f"Not ready: {len(report.blocking)} blocking issue(s). "
-            "Fix them, or release anyway with 'grade-release create --force'."
+            "Fix them, or release anyway with 'opengrader grade-release create --force'."
         )
 
 

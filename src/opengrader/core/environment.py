@@ -181,7 +181,7 @@ def evaluate_ollama(
             (
                 "Ollama grading model",
                 text_model,
-                "Optional: `automated-grading --llm` cannot grade free responses.",
+                "Optional: `opengrader automated-grading --llm` cannot grade free responses.",
             )
         )
 
@@ -265,7 +265,7 @@ def evaluate_canvas_sak(probe: ToolProbe) -> EnvironmentCheck:
         name="canvas-sak",
         status="degraded",
         detail="not on PATH (optional)",
-        impact="Optional: `canvas-export` cannot push grades to Canvas.",
+        impact="Optional: `opengrader canvas-export` cannot push grades to Canvas.",
         fix="uv sync   (then run: canvas-sak help-me-setup)",
     )
 
@@ -285,7 +285,7 @@ def evaluate_graphics(
         detail=f"{description} — low-fidelity preview only",
         impact="Answer crops show as coarse blocks; press 'o' to open one in an image viewer.",
         fix="Use a graphics-capable terminal (Ghostty, kitty, iTerm2, WezTerm), "
-        "or force one with: tui --graphics kitty",
+        "or force one with: opengrader tui --graphics kitty",
     )
 
 
@@ -299,7 +299,7 @@ def evaluate_smoke_test(*, ok: bool, detail: str) -> EnvironmentCheck:
         status="broken",
         detail=detail,
         impact="Opengrader cannot turn an answer key into a printable template on this machine.",
-        fix="uv sync   (then re-run: uv run doctor --smoke)",
+        fix="uv sync   (then re-run: opengrader doctor --smoke)",
     )
 
 
@@ -331,7 +331,7 @@ def evaluate_provider(resolved: "ResolvedAI") -> tuple[EnvironmentCheck, ...]:
 
     provider = resolved.provider
     name = "AI provider"
-    consent_fix = f"opengrader-providers consent {provider.name}   (or Helper Tools → AI setup)"
+    consent_fix = f"opengrader providers consent {provider.name}   (or Helper Tools → AI setup)"
 
     if not resolved.cloud_allowed:
         return (
@@ -381,7 +381,7 @@ def evaluate_provider(resolved: "ResolvedAI") -> tuple[EnvironmentCheck, ...]:
                 status="degraded",
                 detail=f"{provider.label} needs an API key.",
                 impact="AI features are unavailable until a key is set.",
-                fix=f"{app_config.missing_key_help(provider)} Then re-run doctor.",
+                fix=f"{app_config.missing_key_help(provider)} Then re-run opengrader doctor.",
             ),
         )
 
@@ -406,7 +406,7 @@ def evaluate_provider(resolved: "ResolvedAI") -> tuple[EnvironmentCheck, ...]:
                 status="degraded",
                 detail=f"{provider.label}: could not list models ({summarize_connection_error(str(exc))}).",
                 impact="AI features may fail at runtime.",
-                fix="Check the network connection and the API key, then re-run doctor.",
+                fix="Check the network connection and the API key, then re-run opengrader doctor.",
             ),
         )
 
@@ -475,7 +475,7 @@ def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> Environment
             status="unknown",
             detail="not timed",
             impact="Response-time checks require a measurement.",
-            fix="Run 'doctor' again with the --time-ai flag to measure the handwriting model.",
+            fix="Run 'opengrader doctor' again with the --time-ai flag to measure the handwriting model.",
         )
 
     if not measurement.ok:
@@ -484,7 +484,7 @@ def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> Environment
             status="degraded",
             detail=measurement.describe(),
             impact="AI features may time out or fail during grading.",
-            fix="Run 'doctor' again with the Ollama server running, or check the model name in AI setup.",
+            fix="Run 'opengrader doctor' again with the Ollama server running, or check the model name in AI setup.",
         )
 
     share = measurement.share_of_limit

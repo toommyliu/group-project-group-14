@@ -33,16 +33,16 @@ from pypdf import PdfReader
 EPILOG = """\
 \b
 Examples:
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --start-page 3
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --blank-template templates/blank.pdf
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --blank-template templates/blank.pdf --extra-work-pages
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/   # no page count → match pages to each other, flag missing pages
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --detect-boundaries --dry-run
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation --fix-order
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --start-page 3
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --blank-template templates/blank.pdf
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --blank-template templates/blank.pdf --extra-work-pages
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/   # no page count → match pages to each other, flag missing pages
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --detect-boundaries --dry-run
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation --fix-order
 """
 
 

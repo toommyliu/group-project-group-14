@@ -28,12 +28,12 @@ from opengrader.core.workspace.store import WorkspaceNotFound
 EPILOG = """\
 \b
 Examples:
-  uv run return-bundle --submissions out/student-submissions/
-  uv run return-bundle --submissions out/student-submissions/ --gradebook
-  uv run return-bundle --submissions out/student-submissions/ --student-pdfs --analysis
-  uv run return-bundle --submissions out/ --output ~/returns --name quiz1-return --all
-  uv run return-bundle --submissions out/student-submissions/ --content gradebook-student
-  uv run return-bundle --submissions out/student-submissions/ --by-section
+  opengrader return-bundle --submissions out/student-submissions/
+  opengrader return-bundle --submissions out/student-submissions/ --gradebook
+  opengrader return-bundle --submissions out/student-submissions/ --student-pdfs --analysis
+  opengrader return-bundle --submissions out/ --output ~/returns --name quiz1-return --all
+  opengrader return-bundle --submissions out/student-submissions/ --content gradebook-student
+  opengrader return-bundle --submissions out/student-submissions/ --by-section
 
 \b
 Contents:

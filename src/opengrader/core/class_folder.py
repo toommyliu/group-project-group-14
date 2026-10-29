@@ -43,7 +43,7 @@ ROLE_LABELS = {
 PIPELINE_ROLES = (ROLE_SCAN, ROLE_QA, ROLE_ROSTER, ROLE_TEMPLATE)
 GRADING_ROLES = (ROLE_QA, ROLE_SUBMISSIONS)
 
-# What opengrader-run builds, so a folder it has run in grades its own output.
+# What opengrader run builds, so a folder it has run in grades its own output.
 _PIPELINE_SUBMISSIONS_DIR = "submissions"
 
 _TEMPLATE_WORDS = frozenset({"template", "blank"})

@@ -32,23 +32,23 @@ EPILOG = """\
 \b
 Examples:
   # 1. Draft the boxes automatically, then look at what it found.
-  uv run region-map propose --input midterm.pdf --output midterm.regions.json
-  uv run region-map preview --map midterm.regions.json --input midterm.pdf \\
+  opengrader region-map propose --input midterm.pdf --output midterm.regions.json
+  opengrader region-map preview --map midterm.regions.json --input midterm.pdf \\
       --output midterm-preview.pdf
 
 \b
   # 2. Detection came back empty? Start from a grid or from nothing instead.
-  uv run region-map propose --input midterm.pdf --grid 4 --output midterm.regions.json
-  uv run region-map propose --input midterm.pdf --blank --output midterm.regions.json
+  opengrader region-map propose --input midterm.pdf --grid 4 --output midterm.regions.json
+  opengrader region-map propose --input midterm.pdf --blank --output midterm.regions.json
 
 \b
   # 3. Borrow points, ids and question types from the answer key.
-  uv run region-map from-qa --map midterm.regions.json --qa-file qa.md
+  opengrader region-map from-qa --map midterm.regions.json --qa-file qa.md
 
 \b
   # 4. Check it, then grade with it.
-  uv run region-map validate --map midterm.regions.json --input midterm.pdf
-  uv run submission-extractor --input scans/ --output out/student-submissions/ \\
+  opengrader region-map validate --map midterm.regions.json --input midterm.pdf
+  opengrader submission-extractor --input scans/ --output out/student-submissions/ \\
       --region-map midterm.regions.json
 
 \b
@@ -206,7 +206,7 @@ def propose_command(
     """Render each page of the blank assignment, run Opengrader's layout
     detector over it, and write what it found as a region map. The result is
     a first draft to correct, not an answer to trust — check it with
-    `region-map preview`.
+    `opengrader region-map preview`.
     """
     output_path = Path(output) if output else default_region_map_path(input_path)
 
@@ -262,7 +262,7 @@ def propose_command(
         print(
             "\n  Nothing was detected. This assignment's layout is not one the\n"
             "  detector can read — that is an ordinary outcome, not a failure.\n"
-            f"  Start from a grid instead:  region-map propose --input "
+            f"  Start from a grid instead:  opengrader region-map propose --input "
             f"{input_path.name} --grid 4"
         )
 
@@ -274,7 +274,7 @@ def propose_command(
         print("\nFindings:")
         _print_findings(findings)
     print(
-        f"\nNext: region-map preview --map {output_path.name} "
+        f"\nNext: opengrader region-map preview --map {output_path.name} "
         f"--input {input_path.name} --output preview.pdf"
     )
 

@@ -176,7 +176,7 @@ def verify_region_map(
             "page_count",
             f"this region map was drawn on a {region_map.source_pages}-page assignment "
             f"({region_map.source_name}), but {path.name} has {page_count} pages. "
-            "Re-map the current assignment with: region-map propose --input "
+            "Re-map the current assignment with: opengrader region-map propose --input "
             f"{path.name} --output {default_region_map_path(path).name}",
         )
 
@@ -187,7 +187,7 @@ def verify_region_map(
             f"{path.name} is not the file this region map was drawn on "
             f"(expected {region_map.source_name}). Even a re-export of the same "
             "assignment moves the boxes, so applying this map would mis-crop every "
-            "answer of every student. Re-map the current file with: region-map "
+            "answer of every student. Re-map the current file with: opengrader region-map "
             f"propose --input {path.name} --output "
             f"{default_region_map_path(path).name}",
         )
@@ -664,7 +664,7 @@ def validate_region_map(
                     SEVERITY_WARNING,
                     f"{qid} has no point value. Grading can still proceed (the "
                     "answer key may supply it), or seed them with "
-                    "`region-map from-qa`.",
+                    "`opengrader region-map from-qa`.",
                     question_id=qid or None,
                     page=question.page,
                 )

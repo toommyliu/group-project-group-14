@@ -33,11 +33,11 @@ from opengrader.core.submissions.suggested_groups import (
 EPILOG = """\
 \b
 Examples:
-  uv run answer-groups --input out/student-submissions/
-  uv run answer-groups --input out/student-submissions/ --suggestions
-  uv run answer-groups --input out/student-submissions/ --threshold 0.9
-  uv run answer-groups --input out/student-submissions/ --question q3 --suggestions
-  uv run answer-groups --input out/student-submissions/ --json
+  opengrader answer-groups --input out/student-submissions/
+  opengrader answer-groups --input out/student-submissions/ --suggestions
+  opengrader answer-groups --input out/student-submissions/ --threshold 0.9
+  opengrader answer-groups --input out/student-submissions/ --question q3 --suggestions
+  opengrader answer-groups --input out/student-submissions/ --json
 """
 
 

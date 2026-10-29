@@ -283,7 +283,7 @@ class WriteBackScreen(ModalScreen[bool]):
             lines += [f"  {change.describe()}: {error}" for change, error in outcome.failed]
         lines += [
             "",
-            "Undo with:  grade-restore apply --submissions "
+            "Undo with:  opengrader grade-restore apply --submissions "
             f"{plan.submissions_dir} --without-actor merge:workspace --yes",
         ]
         self.app.call_from_thread(self._show_applied, "\n".join(lines), bool(outcome.written))

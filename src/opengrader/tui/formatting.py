@@ -753,7 +753,7 @@ def format_grader_agreement_overview(report: "GraderAgreementReport") -> str:
     else:
         lines.append(
             "[dim]No two graders marked comparable work, so they cannot be "
-            "compared. Run [b]calibrate pack[/b] to have everyone mark the same "
+            "compared. Run [b]opengrader calibrate pack[/b] to have everyone mark the same "
             "sample.[/dim]"
         )
     return "\n".join(lines)

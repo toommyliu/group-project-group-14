@@ -18,11 +18,11 @@ from opengrader.core.environment import (
 EPILOG = """\
 \b
 Examples:
-  uv run doctor                      # check everything
-  uv run doctor --smoke              # also build a template PDF end to end
-  uv run doctor --json               # machine-readable, for a bug report
-  uv run doctor --fail-on-problem    # exit 2 if a core capability is broken (CI)
-  uv run doctor --ollama-model llama3.1:8b
+  opengrader doctor                      # check everything
+  opengrader doctor --smoke              # also build a template PDF end to end
+  opengrader doctor --json               # machine-readable, for a bug report
+  opengrader doctor --fail-on-problem    # exit 2 if a core capability is broken (CI)
+  opengrader doctor --ollama-model llama3.1:8b
 """
 
 _GLYPHS: dict[str, str] = {
@@ -110,7 +110,7 @@ def _report_to_json(report: EnvironmentReport, *, ai: "app_config.ResolvedAI | N
 )
 @click.option(
     "--llm-model",
-    help="Text model `automated-grading --llm` would use, if different.",
+    help="Text model `opengrader automated-grading --llm` would use, if different.",
 )
 @click.option(
     "--smoke",

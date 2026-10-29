@@ -14,18 +14,18 @@ from opengrader.core.app_config import manifests as ai_manifests
 EPILOG = """\
 \b
 Examples:
-  uv run opengrader-providers list
-  uv run opengrader-providers list --json
-  uv run opengrader-providers add --example openai
-  uv run opengrader-providers add --name sjsu-gateway --label "SJSU Gateway" \\
+  opengrader providers list
+  opengrader providers list --json
+  opengrader providers add --example openai
+  opengrader providers add --name sjsu-gateway --label "SJSU Gateway" \\
       --dialect anthropic-messages --host https://ai.example.edu/v1 \\
       --vision-model claude-haiku-4-5 --text-model claude-haiku-4-5 \\
       --api-key-env SJSU_AI_KEY
-  uv run opengrader-providers add --from ~/Downloads/campus-gateway.toml
-  uv run opengrader-providers validate
-  uv run opengrader-providers validate openai
-  uv run opengrader-providers test openai --yes
-  uv run opengrader-providers remove sjsu-gateway --yes
+  opengrader providers add --from ~/Downloads/campus-gateway.toml
+  opengrader providers validate
+  opengrader providers validate openai
+  opengrader providers test openai --yes
+  opengrader providers remove sjsu-gateway --yes
 """
 
 _TEST_PROMPT = ai_manifests.CONNECTION_TEST_PROMPT
@@ -132,7 +132,7 @@ def list_command(*, as_json: bool) -> None:
         print()
         print("Examples you can start from:")
         for name in examples:
-            print(f"  {name:<20} opengrader-providers add --example {name}")
+            print(f"  {name:<20} opengrader providers add --example {name}")
 
 
 def _install(text: str, *, force: bool) -> tuple[Path, str]:
@@ -162,12 +162,12 @@ def _confirm_add(dest: Path, name: str) -> None:
         if spec.api_key_env:
             print(
                 f"Set {spec.api_key_env} before using it — "
-                f"'opengrader-providers test {name}' will tell you if it resolves."
+                f"'opengrader providers test {name}' will tell you if it resolves."
             )
         if spec.credential_command:
             print(
                 f"credential_command is set: Opengrader will run it only after you "
-                f"approve it with 'opengrader-providers allow-credential-command {name}'."
+                f"approve it with 'opengrader providers allow-credential-command {name}'."
             )
     else:
         reason = next((p for p in problems if str(dest) in p), None)
@@ -224,7 +224,7 @@ def _confirm_add(dest: Path, name: str) -> None:
     metavar="COMMAND [ARG]...",
     help=(
         "Command whose stdout would be the key. Stored, but never run until "
-        "'opengrader-providers allow-credential-command NAME' approves it."
+        "'opengrader providers allow-credential-command NAME' approves it."
     ),
 )
 @click.option("--input-per-mtok", type=float)
@@ -550,7 +550,7 @@ def consent_command(*, provider: str) -> None:
         f"Consent recorded: student work may now be sent to {resolved.host} "
         f"using {resolved.provider.label}."
     )
-    print(f"Revoke at any time: opengrader-providers revoke {resolved.provider.name}")
+    print(f"Revoke at any time: opengrader providers revoke {resolved.provider.name}")
 
 
 @command.command("revoke")
@@ -593,7 +593,7 @@ def allow_credential_command_command(*, provider: str) -> None:
     print(f"Approved: {spec.label}'s credential_command may now run to fetch its key.")
     print(
         "Revoke at any time: "
-        f"opengrader-providers revoke-credential-command {spec.name}"
+        f"opengrader providers revoke-credential-command {spec.name}"
     )
 
 
@@ -624,7 +624,7 @@ def remove_command(*, name: str, yes: bool) -> None:
     )
     if spec is None:
         _error(
-            f"no provider named {name!r}. Run 'opengrader-providers list' to "
+            f"no provider named {name!r}. Run 'opengrader providers list' to "
             "see what is registered."
         )
         sys.exit(1)

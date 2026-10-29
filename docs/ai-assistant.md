@@ -30,14 +30,14 @@ Several accepted answers go on one line separated by `;` or `|` (a comma followe
 **From a terminal**, the same jobs:
 
 ```bash
-uv run opengrader agent answer-key --class-folder class [--source key.docx]   # the assistant writes or fills qa.md
-uv run opengrader agent use-key --folder class-ai-answer-key --to class/qa.md
-uv run opengrader agent prepare --submissions class/submissions --qa-file class/qa.md            # grading
-uv run opengrader agent prepare --submissions class/submissions --qa-file class/qa.md --rubrics  # drafting rubrics
+opengrader agent answer-key --class-folder class [--source key.docx]   # the assistant writes or fills qa.md
+opengrader agent use-key --folder class-ai-answer-key --to class/qa.md
+opengrader agent prepare --submissions class/submissions --qa-file class/qa.md            # grading
+opengrader agent prepare --submissions class/submissions --qa-file class/qa.md --rubrics  # drafting rubrics
 
 # the same in a workspace: name it and the assignment instead
-uv run opengrader agent prepare --workspace course --assignment "Quiz 1"
-uv run opengrader agent answer-key --workspace course --assignment "Quiz 1"
+opengrader agent prepare --workspace course --assignment "Quiz 1"
+opengrader agent answer-key --workspace course --assignment "Quiz 1"
 ```
 
 Start your assistant **inside the folder Opengrader made** and ask it to do what `AGENTS.md` there says (Claude Code reads `CLAUDE.md`, which points to it). For grading it checks the key with `opengrader agent check-key`, looks at each answer image, and records transcriptions and rubric choices with `opengrader agent transcribe` and `opengrader agent grade`; Opengrader checks every choice against the rubric and works out the points. When the key looks wrong, or a question has no partial credit, it records a fix with `opengrader agent suggest` instead of acting on it. You accept or dismiss each one (**Suggestions…** in the app, or `opengrader agent suggestions` / `accept` / `dismiss`), and an accepted fix changes only that question of your key.
@@ -47,12 +47,12 @@ Chat apps without a shell (Claude Desktop, ChatGPT) connect to a copy as an MCP 
 When it is done:
 
 ```bash
-uv run opengrader agent apply --submissions class/submissions --incoming class-ai-assistant/<name> --yes --delete-copy
+opengrader agent apply --submissions class/submissions --incoming class-ai-assistant/<name> --yes --delete-copy
 # a workspace (accept / use-key also take --key-file update|leave):
-uv run opengrader agent apply --workspace course --assignment "Quiz 1" --incoming course-ai-assistant/<name> --yes
+opengrader agent apply --workspace course --assignment "Quiz 1" --incoming course-ai-assistant/<name> --yes
 ```
 
-Its grades arrive marked as AI grades. In the grading app, **v** steps through a question's unconfirmed AI grades and **y** confirms one; picking another rubric option changes it, and the review queue and `grade-check` flag the low-confidence ones. The three-way merge never overwrites a grade you made, and `grade-restore` can undo it.
+Its grades arrive marked as AI grades. In the grading app, **v** steps through a question's unconfirmed AI grades and **y** confirms one; picking another rubric option changes it, and the review queue and `opengrader grade-check` flag the low-confidence ones. The three-way merge never overwrites a grade you made, and `opengrader grade-restore` can undo it.
 
 **What protects student data:** the copy itself, not instructions to the assistant.
 - Every student is an `og-…` code. The scans, the name and ID crops, and the key that maps codes to students stay in your class folder.
@@ -62,7 +62,7 @@ Its grades arrive marked as AI grades. In the grading app, **v** steps through a
 - The copy's `.claude/settings.json` stops Claude Code reading outside it and sandboxes its shell commands. Other assistants have no such file, so start them in the copy.
 - Tesseract misses messy handwriting, so a name scrawled inside an answer box can still get through.
 
-The copy is still student work: use the account your school approved, turn off training on your data on a personal plan, and delete the copy once it is merged (`--delete-copy`). `uv run opengrader ai-readme` is the page to give your assistant.
+The copy is still student work: use the account your school approved, turn off training on your data on a personal plan, and delete the copy once it is merged (`--delete-copy`). `opengrader ai-readme` is the page to give your assistant.
 
 ## Where AI settings are stored
 

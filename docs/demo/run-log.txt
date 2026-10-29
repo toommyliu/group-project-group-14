@@ -57,7 +57,7 @@ Successfully graded and updated submission-0001.submission.md
 Successfully graded and updated submission-0002.submission.md
 
 This run was recorded in the audit journal. To undo it:
-  uv run grade-restore apply --submissions cs146-quiz1/submissions --without-actor automated-grading --yes
+  opengrader grade-restore apply --submissions cs146-quiz1/submissions --without-actor automated-grading --yes
   ✓ graded 2 submission(s) against qa.md
     Publishing results to the workspace.
 
@@ -70,4 +70,4 @@ Summary
   ✓ publish      ran      2 submission(s) available in CS146: Quiz 1.
 
 2 submission(s) ready in cs146-quiz1/submissions
-Open for grading: uv run opengrader tui --workspace cs146-quiz1 --assignment b5c49be3-82f6-5b4d-af9e-5546475f4115
+Open for grading: opengrader tui --workspace cs146-quiz1 --assignment b5c49be3-82f6-5b4d-af9e-5546475f4115

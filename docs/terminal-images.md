@@ -16,5 +16,5 @@ In a coarse-preview terminal, press **`o`** while grading to open the full-resol
 Check what was detected (and include this in any bug report):
 
 ```bash
-uv run tui --check-graphics
+opengrader tui --check-graphics
 ```

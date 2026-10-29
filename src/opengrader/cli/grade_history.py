@@ -18,10 +18,10 @@ from opengrader.core.history import (
 EPILOG = """\
 \b
 Examples:
-  uv run grade-history --input out/student-submissions/
-  uv run grade-history --input out/student-submissions/ --actor prof_kim
-  uv run grade-history --input out/student-submissions/ --student 123456789
-  uv run grade-history --input out/student-submissions/ --json
+  opengrader grade-history --input out/student-submissions/
+  opengrader grade-history --input out/student-submissions/ --actor prof_kim
+  opengrader grade-history --input out/student-submissions/ --student 123456789
+  opengrader grade-history --input out/student-submissions/ --json
 """
 
 _KIND_GLYPH = {"grade": "✓", "comment": "✎", "rubric": "±"}

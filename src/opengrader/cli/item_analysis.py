@@ -27,13 +27,13 @@ from opengrader.core.submissions.student_file import load_student_submission_mar
 EPILOG = """\
 \b
 Examples:
-  uv run item-analysis --input out/student-submissions/
-  uv run item-analysis --input out/student-submissions/ --json
-  uv run item-analysis --input out/student-submissions/ --flagged-only
+  opengrader item-analysis --input out/student-submissions/
+  opengrader item-analysis --input out/student-submissions/ --json
+  opengrader item-analysis --input out/student-submissions/ --flagged-only
 
 \b
 Learning-outcome mastery (needs the answer key, where the **Outcome** tags live):
-  uv run item-analysis --input out/student-submissions/ --solutions solutions.md
+  opengrader item-analysis --input out/student-submissions/ --solutions solutions.md
 """
 
 _DIFFICULTY_LABELS = {

@@ -6,7 +6,8 @@
 uv sync
 npm --prefix src/opengrader/web ci
 npm --prefix src/opengrader/web run build
-uv run opengrader serve # Serves
+sh packaging/install-command.sh
+opengrader serve
 ```
 
 ## Google sign-in
@@ -20,7 +21,7 @@ export OPENGRADER_GOOGLE_CLIENT_ID="..."
 export OPENGRADER_GOOGLE_CLIENT_SECRET="..."
 export OPENGRADER_SESSION_SECRET="$(openssl rand -hex 32)"
 export OPENGRADER_ADMINS="prof@sjsu.edu"
-uv run opengrader serve
+opengrader serve
 ```
 
 Only admins and course staff can sign in. Admins, listed in
@@ -52,7 +53,7 @@ An assignment follows the same steps as the sidebar:
    generate one from the answer key. Draw a region around each question, plus
    the name and ID fields. The outline sets which questions exist and their
    points. Each template and its regions are stored as a region map, the same
-   format the `region-map` CLI writes.
+   format the `opengrader region-map` CLI writes.
 2. **Answer key.** Add expected answers and rubric items to the outline's
    questions.
 3. **Scans.** Upload scanned PDFs. Each scan is split every _n_ pages, where

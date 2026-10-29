@@ -29,13 +29,13 @@ from opengrader.core.workspace.store import Workspace
 EPILOG = """\
 \b
 Examples:
-  uv run grade-release create --submissions out/subs/
-  uv run grade-release create --submissions out/subs/ --label "returned in class" --yes
-  uv run grade-release create --submissions out/subs/ --yes --force
-  uv run grade-release list   --submissions out/subs/
-  uv run grade-release show   --submissions out/subs/ --release rel-2026-08-05-1a2b3c
-  uv run grade-release diff   --submissions out/subs/
-  uv run grade-release diff   --submissions out/subs/ --release rel-2026-08-05-1a2b3c --json
+  opengrader grade-release create --submissions out/subs/
+  opengrader grade-release create --submissions out/subs/ --label "returned in class" --yes
+  opengrader grade-release create --submissions out/subs/ --yes --force
+  opengrader grade-release list   --submissions out/subs/
+  opengrader grade-release show   --submissions out/subs/ --release rel-2026-08-05-1a2b3c
+  opengrader grade-release diff   --submissions out/subs/
+  opengrader grade-release diff   --submissions out/subs/ --release rel-2026-08-05-1a2b3c --json
 
 \b
 Note:
@@ -89,7 +89,7 @@ def _resolve_release(submissions: Path, release_id: str) -> GradeRelease:
         if release is None:
             print(
                 f"Error: no release {release_id!r} in {submissions}. "
-                "Run 'grade-release list' to see what is recorded.",
+                "Run 'opengrader grade-release list' to see what is recorded.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -98,7 +98,7 @@ def _resolve_release(submissions: Path, release_id: str) -> GradeRelease:
     if release is None:
         print(
             f"Error: nothing has been released from {submissions} yet — "
-            "run 'grade-release create' first.",
+            "run 'opengrader grade-release create' first.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -192,7 +192,7 @@ def create_command(
     print()
     print(
         "This changes no grade and blocks nothing. When a grade moves later, "
-        "'grade-release diff' will name it."
+        "'opengrader grade-release diff' will name it."
     )
     if not context.readiness.ready:
         print(

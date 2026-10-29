@@ -54,15 +54,15 @@ from opengrader.core.submissions.student_file import (
 EPILOG = """\
 \b
 Examples:
-  uv run draft-rubric --solutions qa.md --input ./student-submissions/
-  uv run draft-rubric --solutions qa.md --input ./student-submissions/ --question q5
-  uv run draft-rubric --solutions qa.md --input ./student-submissions/ --write
-  uv run draft-rubric --solutions qa.md --input ./student-submissions/ --question q5 --overwrite --write
-  uv run draft-rubric --solutions qa.md --input ./student-submissions/ --json
+  opengrader draft-rubric --solutions qa.md --input ./student-submissions/
+  opengrader draft-rubric --solutions qa.md --input ./student-submissions/ --question q5
+  opengrader draft-rubric --solutions qa.md --input ./student-submissions/ --write
+  opengrader draft-rubric --solutions qa.md --input ./student-submissions/ --question q5 --overwrite --write
+  opengrader draft-rubric --solutions qa.md --input ./student-submissions/ --json
 
 \b
 Step 1 of 2: the model only DRAFTS rubric items; you review them. Step 2:
-  uv run automated-grading --solutions qa.md --input ./student-submissions/ --llm
+  opengrader automated-grading --solutions qa.md --input ./student-submissions/ --llm
 """
 
 DEFAULT_MAX_SAMPLES = 12
@@ -446,7 +446,7 @@ def command(
             if any(result.written for result in results):
                 save_qa_markdown(qa_doc, solutions)
         except ConcurrentModificationError as exc:
-            err(f"Error: {exc} Nothing was written; re-run draft-rubric.")
+            err(f"Error: {exc} Nothing was written; re-run opengrader draft-rubric.")
             for result in results:
                 result.written = False
             if as_json:
@@ -485,7 +485,7 @@ def command(
         say(
             "Next: review the rubric (edit the QA file, or use the grading app's "
             "rubric editor), then grade with it:\n"
-            f"  uv run automated-grading --solutions {solutions} --input {input_path} --llm"
+            f"  opengrader automated-grading --solutions {solutions} --input {input_path} --llm"
         )
     return results
 

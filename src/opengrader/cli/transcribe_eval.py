@@ -33,11 +33,11 @@ from opengrader.core.submissions import load_student_submission_markdown
 EPILOG = """\
 \b
 Examples:
-  uv run transcribe-eval --input out/student-submissions/
-  uv run transcribe-eval --input out/student-submissions/ --target-catch 0.95
-  uv run transcribe-eval --input out/student-submissions/ --ignore-case
-  uv run transcribe-eval --input past-term/subs/ --input this-term/subs/
-  uv run transcribe-eval --input out/student-submissions/ --json
+  opengrader transcribe-eval --input out/student-submissions/
+  opengrader transcribe-eval --input out/student-submissions/ --target-catch 0.95
+  opengrader transcribe-eval --input out/student-submissions/ --ignore-case
+  opengrader transcribe-eval --input past-term/subs/ --input this-term/subs/
+  opengrader transcribe-eval --input out/student-submissions/ --json
 
 \b
 What it measures:
@@ -210,7 +210,7 @@ def _print_human(report: TranscriptionEvalReport, *, worst: int) -> None:
 
     if report.recommended_floor is not None:
         print(
-            f"Recommended: submission-extractor --llm-escalate "
+            f"Recommended: opengrader submission-extractor --llm-escalate "
             f"--escalate-confidence {report.recommended_floor:g}"
         )
         print(

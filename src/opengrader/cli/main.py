@@ -16,11 +16,6 @@ PROGRAM_NAME = "opengrader"
 
 EXIT_INTERRUPTED = 130
 
-UNADVERTISED_ALIASES = frozenset(
-    {"opengrader-run", "opengrader-providers", "opengrader-data-flow", "opengrader-share"}
-)
-
-
 SECTION_START = "Start here"
 SECTION_PREPARE = "Prepare an assignment"
 SECTION_INTAKE = "Take in scans"
@@ -80,7 +75,7 @@ COMMANDS: tuple[Subcommand, ...] = (
         target="opengrader.cli.run:command",
         summary="the whole pre-grading pipeline in one resumable command",
         section=SECTION_START,
-        aliases=("opengrader-run", "pipeline"),
+        aliases=("pipeline",),
     ),
     Subcommand(
         name="tui",
@@ -106,14 +101,12 @@ COMMANDS: tuple[Subcommand, ...] = (
         target="opengrader.cli.providers:command",
         summary="add, test or remove an AI service of your own",
         section=SECTION_START,
-        aliases=("opengrader-providers",),
     ),
     Subcommand(
         name="data-flow",
         target="opengrader.cli.data_flow:command",
         summary="which student data would leave this machine, and to where (FERPA)",
         section=SECTION_START,
-        aliases=("opengrader-data-flow",),
     ),
     Subcommand(
         name="ai-readme",
@@ -184,7 +177,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         target="opengrader.cli.share:command",
         summary="let other accounts on this computer grade in your workspace",
         section=SECTION_GRADERS,
-        aliases=("opengrader-share",),
     ),
     Subcommand(
         name="merge-submissions",
@@ -445,9 +437,8 @@ class OpengraderCLI(click.Group):
             if not spec.listed:
                 continue
             label = spec.name
-            visible_aliases = [a for a in spec.aliases if a not in UNADVERTISED_ALIASES]
-            if visible_aliases:
-                label += " (" + ", ".join(visible_aliases) + ")"
+            if spec.aliases:
+                label += " (" + ", ".join(spec.aliases) + ")"
             rows.setdefault(spec.section, []).append((label, spec.summary))
 
         for name in sorted(self.commands):
@@ -485,8 +476,6 @@ Examples:
   {PROGRAM_NAME} help run                     that tool's own options
 
 Every subcommand takes its own flags: `{PROGRAM_NAME} <command> --help`.
-The standalone commands (`tui`, `submission-splitter`, ...) still work exactly
-as before; this is one door onto the same tools, not a replacement for them.
 """
 
 

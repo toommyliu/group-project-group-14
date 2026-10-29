@@ -25,7 +25,7 @@ Grading paper by hand is slow, and Gradescope and similar tools are paid cloud s
 
 | Step | What you can do |
 | --- | --- |
-| 1. Answer key | Write a `qa.md` key ([format](src/opengrader/guides/qa-format.md)), or draft one from a Word, text, or PDF key with `create-answer-key`. |
+| 1. Answer key | Write a `qa.md` key ([format](src/opengrader/guides/qa-format.md)), or draft one from a Word, text, or PDF key with `opengrader create-answer-key`. |
 | 2. Assignment | Generate printable PDFs with answer boxes, multiple versions, QR codes, and bubble sheets. |
 | 3. Scan intake | Catch rotated, blank, or missing pages, split the stack into one PDF per student, and import phone photos. |
 | 4. Reading | Crop every answer and read each student's name and ID with Tesseract and PP-OCR. A local vision model can read handwriting. |
@@ -137,16 +137,16 @@ Details and uninstall steps are in [packaging/README.md](packaging/README.md).
    npm --prefix src/opengrader/web ci
    npm --prefix src/opengrader/web run build
    ```
-5. Check the setup. `doctor` names anything missing and the command that fixes it:
-   ```bash
-   uv run opengrader doctor
-   ```
-6. Optional: put `opengrader` on your PATH so you can drop `uv run`:
+5. Put `opengrader` on your PATH:
    ```bash
    sh packaging/install-command.sh
    ```
+6. Check the setup. `opengrader doctor` names anything missing and the command that fixes it:
+   ```bash
+   opengrader doctor
+   ```
 
-To use a local model, start `ollama serve`, run `ollama pull qwen3.5:9b` and `ollama pull qwen2.5vl:7b`, then pick it under Tools → AI models & providers. `uv run opengrader ai-readme --local` prints every step.
+To use a local model, start `ollama serve`, run `ollama pull qwen3.5:9b` and `ollama pull qwen2.5vl:7b`, then pick it under Tools → AI models & providers. `opengrader ai-readme --local` prints every step.
 
 ### Environment variables
 
@@ -183,7 +183,7 @@ Run the whole pipeline on a sample scan. Copy it first, because grading writes i
 ```bash
 mkdir -p /tmp/og-demo
 cp samples/cs146-quiz1/{qa.md,submissions.pdf,template-vA.pdf} /tmp/og-demo/
-uv run opengrader run /tmp/og-demo --no-llm
+opengrader run /tmp/og-demo --no-llm
 ```
 
 It checks the 6-page scan, splits it into 2 students, crops 22 answers, auto-grades what it can, and prints a summary in about 15 seconds. Run it again and it skips finished work. `--llm` lets the configured AI read handwriting and suggest grades.
@@ -191,17 +191,17 @@ It checks the 6-page scan, splits it into 2 students, crops 22 answers, auto-gra
 Grade the result in the terminal (`enter` opens a question, `1`–`9` picks a rubric item, `?` lists shortcuts, `q` quits):
 
 ```bash
-uv run opengrader tui /tmp/og-demo
+opengrader tui /tmp/og-demo
 ```
 
 Or in the browser:
 
 ```bash
-uv run opengrader web --workspace /tmp/og-demo
-uv run opengrader stop          # when you're done
+opengrader web --workspace /tmp/og-demo
+opengrader stop          # when you're done
 ```
 
-`uv run opengrader classic` opens the desktop app, the same thing the Desktop icon runs. `uv run opengrader --help` lists every command.
+`opengrader classic` opens the desktop app, the same thing the Desktop icon runs. `opengrader --help` lists every command.
 
 More how-tos:
 
@@ -272,7 +272,7 @@ Before the Project Expo on December 11:
 - [ ] Run the Windows and Linux installers on real machines and fix what breaks.
 - [ ] Grade a real quiz with several TAs on a shared web workspace with Google sign-in.
 - [ ] Mask the name and ID area out of answer crops before any cloud request, and cap model response size.
-- [ ] Measure how often handwriting reading and AI grade suggestions agree with human graders, using `llm-eval` and `transcribe-eval`.
+- [ ] Measure how often handwriting reading and AI grade suggestions agree with human graders, using `opengrader llm-eval` and `opengrader transcribe-eval`.
 - [ ] Build a one-click demo folder, record an updated video, and make the poster.
 
 ## License

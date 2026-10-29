@@ -21,11 +21,11 @@ from opengrader.core.submissions.photo_intake import (
 EPILOG = """\
 \b
 Examples:
-  uv run photo-import --input photos/ --output split/
-  uv run photo-import --input photos/ --output split/ --pages-per-photo-set 3
-  uv run photo-import --input photos/ --output split/ --paper a4
-  uv run photo-import --input photos/ --output split/ --no-perspective   # deskew only
-  uv run photo-import --input photos/ --output split/ --json             # for scripting
+  opengrader photo-import --input photos/ --output split/
+  opengrader photo-import --input photos/ --output split/ --pages-per-photo-set 3
+  opengrader photo-import --input photos/ --output split/ --paper a4
+  opengrader photo-import --input photos/ --output split/ --no-perspective   # deskew only
+  opengrader photo-import --input photos/ --output split/ --json             # for scripting
 
 \b
 Grouping (chosen automatically, in this order):
@@ -38,7 +38,7 @@ Grouping (chosen automatically, in this order):
 
 \b
 Then hand off to submission-extractor:
-  uv run submission-extractor --input split/ --output out/student-submissions/
+  opengrader submission-extractor --input split/ --output out/student-submissions/
 """
 
 _METHOD_LABEL = {
@@ -100,7 +100,7 @@ def _print_report(report: PhotoIntakeReport) -> None:
 
     print(f"\nWrote {len(report.submissions)} submission PDF(s) to {report.output_dir}")
     print(
-        "Next: uv run submission-extractor --input "
+        "Next: opengrader submission-extractor --input "
         f"{report.output_dir} --output {report.output_dir}-extracted/"
     )
 
@@ -126,7 +126,7 @@ def _print_report(report: PhotoIntakeReport) -> None:
     type=int,
     help=(
         "Fixed number of photos per student, taken in natural filename "
-        "order. Mirrors submission-splitter --pages-per-submission."
+        "order. Mirrors opengrader submission-splitter --pages-per-submission."
     ),
 )
 @click.option(

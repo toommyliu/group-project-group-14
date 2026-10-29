@@ -611,7 +611,7 @@ def render_course_toml(
 ) -> str:
     lines = [
         "# Opengrader course gradebook.",
-        "#   uv run course-grades --course course.toml",
+        "#   opengrader course-grades --course course.toml",
         "#",
         "# weight = how much an assignment counts toward the final grade.",
         "# Weights are relative, so 1/1/2 and 25/25/50 describe the same course.",

@@ -238,7 +238,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self.notify(
             f"{where} can't display images, so answer crops show as a "
             "low-fidelity preview. Press 'o' while grading to open a crop in "
-            "your image viewer. Run 'tui --check-graphics' for details.",
+            "your image viewer. Run 'opengrader tui --check-graphics' for details.",
             title="Terminal graphics unavailable",
             severity="warning",
             timeout=12,

@@ -12,7 +12,7 @@ Delete generated sample submissions, crops, transcriptions, grades, and
 Opengrader metadata, then split, extract, and auto-grade each submissions.pdf.
 Source scans, templates, answer keys, and ground-truth labels are preserved.
 Samples without submissions.pdf are skipped. Uses the saved AI settings,
-with response transcription enabled. Requires uv and the extraction dependencies.
+with response transcription enabled. Requires opengrader on PATH and the extraction dependencies.
 USAGE
     case "$1" in
         -h|--help) exit 0 ;;
@@ -20,7 +20,7 @@ USAGE
     esac
 fi
 
-command -v uv >/dev/null 2>&1 || { echo "uv is required." >&2; exit 1; }
+command -v opengrader >/dev/null 2>&1 || { echo "opengrader is required on PATH." >&2; exit 1; }
 cd -- "$repo_root"
 
 for scan in "$samples_dir"/*/submissions.pdf; do
@@ -37,14 +37,14 @@ for scan in "$samples_dir"/*/submissions.pdf; do
     assignment_dir=$(dirname -- "$scan")
     echo "Regenerating $(basename -- "$assignment_dir")"
 
-    uv run submission-splitter --input "$scan" \
+    opengrader submission-splitter --input "$scan" \
         --output "$assignment_dir/split-submissions" --fix-rotation --fix-order
 
-    uv run submission-extractor --input "$assignment_dir/split-submissions" \
+    opengrader submission-extractor --input "$assignment_dir/split-submissions" \
         --output "$assignment_dir/student-submissions"
 
     if [ -f "$assignment_dir/qa.md" ]; then
-        uv run automated-grading --solutions "$assignment_dir/qa.md" \
+        opengrader automated-grading --solutions "$assignment_dir/qa.md" \
             --input "$assignment_dir/student-submissions"
     else
         echo "Skipping auto-grading: no qa.md in $(basename -- "$assignment_dir")"

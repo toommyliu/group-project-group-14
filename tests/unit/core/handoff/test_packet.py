@@ -307,7 +307,7 @@ def test_the_readme_tells_the_grader_how_to_open_it(cohort: Path, tmp_path: Path
     qa.write_text("# key")
     result = build_packet(cohort, tmp_path / "out", packet_id="p1", qa_file_path=qa)
     readme = (result.packet_path / "README.txt").read_text()
-    assert "uv run tui --qa-file qa.md --submissions submissions/" in readme
+    assert "opengrader tui --qa-file qa.md --submissions submissions/" in readme
     assert "anonymous by design" in readme
 
 

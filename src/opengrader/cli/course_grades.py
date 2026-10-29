@@ -22,13 +22,13 @@ from opengrader.core.export.gradebook import escape_csv_field
 EPILOG = f"""\
 \b
 Examples:
-  uv run course-grades --course course.toml
-  uv run course-grades --course .                      # finds ./{COURSE_FILENAME}
-  uv run course-grades --course course.toml --csv course-grades.csv
-  uv run course-grades --course course.toml --at-risk
-  uv run course-grades --course course.toml --outcomes
-  uv run course-grades --course course.toml --student 012345
-  uv run course-grades --course course.toml --json
+  opengrader course-grades --course course.toml
+  opengrader course-grades --course .                      # finds ./{COURSE_FILENAME}
+  opengrader course-grades --course course.toml --csv course-grades.csv
+  opengrader course-grades --course course.toml --at-risk
+  opengrader course-grades --course course.toml --outcomes
+  opengrader course-grades --course course.toml --student 012345
+  opengrader course-grades --course course.toml --json
 
 \b
 A course.toml looks like:

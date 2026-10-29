@@ -32,16 +32,16 @@ from opengrader.core.submissions.student_file import load_student_submission_mar
 EPILOG = """\
 \b
 Examples:
-  uv run claim divide --submissions out/subs/ --graders alice,bob,carol
-  uv run claim divide --submissions out/subs/ --graders alice,bob --by student
-  uv run claim add --submissions out/subs/ --questions q1-q3
-  uv run claim add --submissions out/subs/ --questions q1,q2,q7 --actor alice
-  uv run claim add --submissions out/subs/ --student-range 1-40 --note "morning batch"
-  uv run claim list --submissions out/subs/                 # active claims
-  uv run claim list --submissions out/subs/ --all --json
-  uv run claim status --submissions out/subs/               # gaps and overlaps
-  uv run claim release cl-1a2b3c4d --submissions out/subs/
-  uv run claim complete cl-1a2b3c4d --submissions out/subs/
+  opengrader claim divide --submissions out/subs/ --graders alice,bob,carol
+  opengrader claim divide --submissions out/subs/ --graders alice,bob --by student
+  opengrader claim add --submissions out/subs/ --questions q1-q3
+  opengrader claim add --submissions out/subs/ --questions q1,q2,q7 --actor alice
+  opengrader claim add --submissions out/subs/ --student-range 1-40 --note "morning batch"
+  opengrader claim list --submissions out/subs/                 # active claims
+  opengrader claim list --submissions out/subs/ --all --json
+  opengrader claim status --submissions out/subs/               # gaps and overlaps
+  opengrader claim release cl-1a2b3c4d --submissions out/subs/
+  opengrader claim complete cl-1a2b3c4d --submissions out/subs/
 """
 
 _STATUS_GLYPH = {"active": "●", "completed": "✓", "released": "○"}

@@ -285,7 +285,7 @@ class ReleaseScreen(ModalScreen[str | None]):
             if extra > 0:
                 body.mount(
                     Static(
-                        f"…and {extra} more. Run 'grade-release diff' for the "
+                        f"…and {extra} more. Run 'opengrader grade-release diff' for the "
                         "whole list.",
                         classes="release-empty",
                     )

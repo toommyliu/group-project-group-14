@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+command -v opengrader >/dev/null 2>&1 || { echo "opengrader is required on PATH." >&2; exit 1; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SAMPLES_DIR="$REPO_ROOT/samples"
@@ -26,7 +28,7 @@ while IFS= read -r split_dir; do
   fi
   shopt -u dotglob
 
-  uv run submission-extractor \
+  opengrader submission-extractor \
     --input "$split_dir" \
     --output "$output_dir" \
     --ollama-timeout 60 \

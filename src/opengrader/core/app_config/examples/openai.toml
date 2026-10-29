@@ -1,4 +1,4 @@
-# Install with: opengrader-providers add --example openai
+# Install with: opengrader providers add --example openai
 # api_key_env names a variable; keep the key out of this file.
 
 name         = "openai"

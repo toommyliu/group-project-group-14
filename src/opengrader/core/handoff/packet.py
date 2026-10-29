@@ -580,7 +580,7 @@ def _packet_readme(
         "",
         "To grade this packet:",
         "",
-        f"    uv run tui --qa-file {qa_name} --submissions {PACKET_SUBMISSIONS_DIRNAME}/",
+        f"    opengrader tui --qa-file {qa_name} --submissions {PACKET_SUBMISSIONS_DIRNAME}/",
         "",
         "Grade normally, then send the whole folder back to whoever gave it to",
         "you. They will merge your grades into the master copy.",

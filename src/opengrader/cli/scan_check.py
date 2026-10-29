@@ -23,19 +23,19 @@ from opengrader.core.submissions.scan_check import (
 EPILOG = """\
 \b
 Examples:
-  uv run scan-check --input scans/all-submissions.pdf
-  uv run scan-check --input scans/all-submissions.pdf --pages-per-submission 6   # also checks page order
-  uv run scan-check --input scans/all-submissions.pdf --fix            # writes all-submissions-upright.pdf
-  uv run scan-check --input split/ --blank-template templates/blank.pdf
-  uv run scan-check --input split/ --fix --output split-upright/
-  uv run scan-check --input scans/all.pdf --json --fail-on-high        # for scripting/CI
+  opengrader scan-check --input scans/all-submissions.pdf
+  opengrader scan-check --input scans/all-submissions.pdf --pages-per-submission 6   # also checks page order
+  opengrader scan-check --input scans/all-submissions.pdf --fix            # writes all-submissions-upright.pdf
+  opengrader scan-check --input split/ --blank-template templates/blank.pdf
+  opengrader scan-check --input split/ --fix --output split-upright/
+  opengrader scan-check --input scans/all.pdf --json --fail-on-high        # for scripting/CI
 
 \b
 Note:
   Out-of-order pages are reported here, never repaired here — page numbers
   restart at 1 for every student, so they can only be put back in order after
   the bundle is split. Fix them with:
-    uv run submission-splitter --input scans/all.pdf --output split/ \\
+    opengrader submission-splitter --input scans/all.pdf --output split/ \\
         --pages-per-submission 6 --fix-order
 """
 

@@ -248,7 +248,6 @@ def test_the_front_door_routes_to_this_command() -> None:
     from opengrader.cli.main import find
 
     assert find("providers").target == "opengrader.cli.providers:command"
-    assert find("opengrader-providers").name == "providers"
 
 
 def test_prompt_prints_the_assistant_prompt_and_nothing_else(capsys) -> None:

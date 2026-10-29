@@ -26,14 +26,14 @@ from opengrader.core.submissions import (
 EPILOG = """\
 \b
 Examples:
-  uv run curve show   --submissions out/student-submissions/
-  uv run curve set    --submissions out/student-submissions/ --method bonus --value 5
-  uv run curve set    --submissions out/student-submissions/ --method scale --value 1.1
-  uv run curve set    --submissions out/student-submissions/ --method sqrt
-  uv run curve set    --submissions out/student-submissions/ --method scale --value 1.1 --no-cap
-  uv run curve suggest --submissions out/student-submissions/ --method scale --target-mean 78
-  uv run curve suggest --submissions out/student-submissions/ --method bonus --target-median 75 --apply
-  uv run curve clear  --submissions out/student-submissions/
+  opengrader curve show   --submissions out/student-submissions/
+  opengrader curve set    --submissions out/student-submissions/ --method bonus --value 5
+  opengrader curve set    --submissions out/student-submissions/ --method scale --value 1.1
+  opengrader curve set    --submissions out/student-submissions/ --method sqrt
+  opengrader curve set    --submissions out/student-submissions/ --method scale --value 1.1 --no-cap
+  opengrader curve suggest --submissions out/student-submissions/ --method scale --target-mean 78
+  opengrader curve suggest --submissions out/student-submissions/ --method bonus --target-median 75 --apply
+  opengrader curve clear  --submissions out/student-submissions/
 """
 
 
@@ -256,7 +256,7 @@ def suggest_command(
         write_curve(submissions_path, curve)
         print(f"Applied. file: {resolve_curve_path(submissions_path)}")
     else:
-        print("  (preview only — re-run with --apply to save, or use curve set)")
+        print("  (preview only — re-run with --apply to save, or use opengrader curve set)")
 
 
 @command.command("clear")

@@ -31,11 +31,11 @@ NO_QUESTIONS_HELP = (
 EPILOG = """\
 \b
 Examples:
-  uv run create-answer-key --input questions.md --output qa.md
-  uv run create-answer-key --input questions.docx --output qa.md --title "Quiz 1"
-  uv run create-answer-key --input questions.txt --output qa.md --default-points 5
-  uv run create-answer-key --input answer-key.pdf --output qa.md
-  uv run create-answer-key --input answer-key.pdf --output qa.md --blank-template blank.pdf
+  opengrader create-answer-key --input questions.md --output qa.md
+  opengrader create-answer-key --input questions.docx --output qa.md --title "Quiz 1"
+  opengrader create-answer-key --input questions.txt --output qa.md --default-points 5
+  opengrader create-answer-key --input answer-key.pdf --output qa.md
+  opengrader create-answer-key --input answer-key.pdf --output qa.md --blank-template blank.pdf
 """
 
 
@@ -417,7 +417,7 @@ def command(
     except ValueError as exc:
         emit(
             f"Warning: the generated file needs manual fixes before grading "
-            f"(run 'qa-file validate' after editing): {exc}"
+            f"(run 'opengrader qa-file validate' after editing): {exc}"
         )
     note = default_points_note(defaulted["given"], defaulted["total"], default_points)
     if note:

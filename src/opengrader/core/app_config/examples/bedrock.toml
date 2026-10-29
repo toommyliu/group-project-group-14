@@ -1,4 +1,4 @@
-# Install with: opengrader-providers add --example bedrock
+# Install with: opengrader providers add --example bedrock
 #
 # AWS Bedrock authenticates with SigV4 and the AWS credential chain, not an
 # API-key header, so this manifest uses the optional "pydantic-ai" backend

@@ -158,8 +158,7 @@ separately and are **not** deleted.
 ## Install the `opengrader` terminal command
 
 This lets you type `opengrader doctor` (or any other Opengrader command) from
-any folder, instead of `uv run opengrader doctor` from inside the Opengrader
-folder. It adds **one** command, `opengrader`; every tool is reached through
+any folder. It adds **one** command, `opengrader`; every tool is reached through
 it (`opengrader tui`, `opengrader run`, `opengrader split …`).
 
 | System | Run this once, from the Opengrader folder | It installs to |
@@ -347,12 +346,6 @@ venv's `bin/opengrader` script: those scripts hard-code the absolute path of
 the Python they were installed with, so they break as soon as the folder moves
 or its drive is renamed. `python -m` carries no such path, which is why
 `src/opengrader/__main__.py` exists.
-
-The command installs one name rather than all the scripts in
-`[project.scripts]`. `uv tool install .` would put every one of them (`doctor`,
-`curve`, `claim`, `tui`, …) on PATH as a global command, and uv has no way to
-install only some of a package's scripts — so this installer exists to keep
-`opengrader` the one name to remember.
 
 On Windows, `opengrader.cmd` exists because a `.ps1` can't be run by name
 (`.PS1` isn't in `PATHEXT`). It only hands off to `opengrader.ps1` beside it

@@ -4,7 +4,6 @@ import json
 import re
 import subprocess
 import sys
-import tomllib
 from collections import Counter
 from pathlib import Path
 
@@ -19,23 +18,6 @@ from opengrader.cli.main import (
     cli,
     find,
 )
-
-PYPROJECT_PATH = Path(__file__).resolve().parents[3] / "pyproject.toml"
-
-
-def test_every_pyproject_script_maps_onto_a_registry_row() -> None:
-    scripts = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"]["scripts"]
-
-    legacy_scripts = {name: target for name, target in scripts.items() if name != "opengrader"}
-
-    registry_targets = {spec.target for spec in COMMANDS}
-    missing_targets = sorted(
-        name for name, target in legacy_scripts.items() if target not in registry_targets
-    )
-    assert missing_targets == [], f"pyproject scripts with no matching Subcommand.target: {missing_targets}"
-
-    unresolved_names = sorted(name for name in legacy_scripts if find(name) is None)
-    assert unresolved_names == [], f"legacy script names find() cannot resolve: {unresolved_names}"
 
 
 def test_no_name_or_alias_collides_with_another() -> None:
@@ -130,7 +112,6 @@ def test_an_interrupted_subcommand_exits_130(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_aliases_resolve_to_the_same_registry_row_as_their_canonical_name() -> None:
     assert find("split") is find("submission-splitter")
-    assert find("opengrader-run") is find("run")
     assert find("pipeline") is find("run")
 
 

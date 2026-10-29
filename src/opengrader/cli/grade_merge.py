@@ -39,15 +39,15 @@ from opengrader.core.history import GradeJournal, resolve_history_dir
 EPILOG = """\
 \b
 Examples:
-  uv run grade-merge pack --submissions out/subs/ --output ~/handouts --grader alice --qa-file qa.md
-  uv run grade-merge pack --submissions out/subs/ --output ~/handouts --name quiz1-alice
-  uv run grade-merge list --submissions out/subs/
-  uv run grade-merge preview --submissions out/subs/ --incoming ~/from-alice/
-  uv run grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --yes
-  uv run grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --conflicts theirs --yes
+  opengrader grade-merge pack --submissions out/subs/ --output ~/handouts --grader alice --qa-file qa.md
+  opengrader grade-merge pack --submissions out/subs/ --output ~/handouts --name quiz1-alice
+  opengrader grade-merge list --submissions out/subs/
+  opengrader grade-merge preview --submissions out/subs/ --incoming ~/from-alice/
+  opengrader grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --yes
+  opengrader grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --conflicts theirs --yes
 
 \b
-  uv run grade-merge pack --submissions out/subs/ --grader alice --encrypt
+  opengrader grade-merge pack --submissions out/subs/ --grader alice --encrypt
 
 \b
 Encryption:
@@ -65,7 +65,7 @@ Encryption:
 
 \b
 Undo a merge:
-  uv run grade-restore apply --submissions out/subs/ --without-actor merge:<packet-id> --yes
+  opengrader grade-restore apply --submissions out/subs/ --without-actor merge:<packet-id> --yes
 """
 
 
@@ -410,7 +410,7 @@ def preview_command(
             return
         _print_plan(plan)
         _print_caveats(plan, ours_side, theirs_side)
-        print("\nPreview only. Use 'grade-merge apply … --yes' to write.")
+        print("\nPreview only. Use 'opengrader grade-merge apply … --yes' to write.")
 
 
 @command.command("apply")
@@ -526,7 +526,7 @@ def _apply_prepared(  # noqa: ANN001
             undo_actors.extend(imported.actors)
 
     undo_flags = " ".join(f"--without-actor {actor}" for actor in undo_actors)
-    print(f"\nUndo with:\n  grade-restore apply --submissions {ours} {undo_flags} --yes")
+    print(f"\nUndo with:\n  opengrader grade-restore apply --submissions {ours} {undo_flags} --yes")
     if len(undo_actors) > 1:
         print(
             "  (the imported history names the other grader too, so their "

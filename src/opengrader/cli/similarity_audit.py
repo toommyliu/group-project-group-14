@@ -31,15 +31,15 @@ from opengrader.core.submissions.student_file import load_student_submission_mar
 EPILOG = """\
 \b
 Examples:
-  uv run similarity-audit --input out/student-submissions/
-  uv run similarity-audit --input out/student-submissions/ --threshold 0.9
-  uv run similarity-audit --input out/student-submissions/ --json
-  uv run similarity-audit --input out/student-submissions/ --fail-on-match
+  opengrader similarity-audit --input out/student-submissions/
+  opengrader similarity-audit --input out/student-submissions/ --threshold 0.9
+  opengrader similarity-audit --input out/student-submissions/ --json
+  opengrader similarity-audit --input out/student-submissions/ --fail-on-match
 
 \b
 Also audit the objective questions (needs the answer key):
-  uv run similarity-audit --input out/student-submissions/ --solutions solutions.md
-  uv run similarity-audit --input out/student-submissions/ --solutions solutions.md \\
+  opengrader similarity-audit --input out/student-submissions/ --solutions solutions.md
+  opengrader similarity-audit --input out/student-submissions/ --solutions solutions.md \\
     --pattern-threshold 4.5      # fewer, stronger objective flags
 """
 

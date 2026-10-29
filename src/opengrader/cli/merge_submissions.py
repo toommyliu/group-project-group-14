@@ -16,7 +16,7 @@ from opengrader.cli import CONTEXT_SETTINGS
 
 EPILOG = """\b
 Example (a six-page paper split 5 + 1 as submission-0001 and submission-0002):
-  uv run merge-submissions submission-0001 submission-0002 --folder classes/quiz3
+  opengrader merge-submissions submission-0001 submission-0002 --folder classes/quiz3
 """
 
 

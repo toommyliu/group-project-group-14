@@ -117,8 +117,8 @@ _REPORT_ROWS: list[tuple[str, str]] = [
         "and end of their session, and — where two graders marked comparable "
         "work — how often they agreed and who is the more generous. On a "
         "cleanly divided class nobody marks comparable work, and it says so "
-        "rather than guessing: `calibrate pack` sets up a norming round where "
-        "everyone marks the same sample. CLI: calibrate report.",
+        "rather than guessing: `opengrader calibrate pack` sets up a norming round where "
+        "everyone marks the same sample. CLI: opengrader calibrate report.",
     ),
     (
         "shift+F",
@@ -180,8 +180,8 @@ _SHARING_ROWS: list[tuple[str, str]] = [
         "changes no grade and stops nothing; it remembers what each student "
         "was shown, so press shift+L again later and 'What changed' names "
         "every question whose grade has moved since — which is the answer to "
-        "\"this is not the grade you gave me\". From a terminal: grade-check "
-        "and grade-release.",
+        "\"this is not the grade you gave me\". From a terminal: opengrader grade-check "
+        "and opengrader grade-release.",
     ),
     (
         "shift+Q",
@@ -325,7 +325,7 @@ _GRADING_ROWS: list[tuple[str, str]] = [
         "ctrl+r) asks the configured AI to draft partial-credit items from "
         "the answers students actually gave; the draft only fills the "
         "editor rows, and nothing is saved until you review it and press Save. "
-        "The same draft from a terminal: CLI: draft-rubric.",
+        "The same draft from a terminal: CLI: opengrader draft-rubric.",
     ),
     (
         "c",
@@ -359,7 +359,7 @@ _GRADING_ROWS: list[tuple[str, str]] = [
         "check could not orient. The view only: the scan, the transcription "
         "and the grade are untouched. The current angle is shown next to the "
         "zoom level, and clears when you move to another student. To fix a "
-        "whole stack scanned the wrong way round, use scan-check --fix "
+        "whole stack scanned the wrong way round, use opengrader scan-check --fix "
         "(or the splitter's scan-check option) before extracting instead.",
     ),
     (
@@ -391,7 +391,7 @@ _GRADING_ROWS: list[tuple[str, str]] = [
         "This paper is only part of a student's work because the splitter "
         "cut one paper in two: join it with the submission scanned just "
         "before or after it. The joined paper is read again and the grades "
-        "both pieces had are kept. CLI: merge-submissions.",
+        "both pieces had are kept. CLI: opengrader merge-submissions.",
     ),
     ("esc", "Back to the QA picker."),
 ]
@@ -421,7 +421,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "than one candidate, or the scan or answer key lives somewhere else, "
         "Advanced settings opens so you can choose. The scanned bundle can "
         "also be a folder of already-split per-student PDFs (what Import "
-        "phone photos writes), in which case nothing is split. CLI: opengrader-run class/ ('--scan bundle.pdf "
+        "phone photos writes), in which case nothing is split. CLI: opengrader run class/ ('--scan bundle.pdf "
         "--qa qa.md --out class/' still works, and any flag overrides what "
         "the folder offered).",
     ),
@@ -452,14 +452,14 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "queue (Shift+R). Auto-grade: scores the answers your rubric settles "
         "outright and, with 'Suggest grades for written answers' on in AI "
         "setup, suggests rubric choices for the rest — see AI SETUP below. "
-        "CLI: scan-check, submission-splitter, submission-extractor, "
-        "automated-grading.",
+        "CLI: opengrader scan-check, opengrader submission-splitter, "
+        "opengrader submission-extractor, opengrader automated-grading.",
     ),
     (
         "Grading with other accounts",
         "On a computer several people reach over SSH, the professor shares the "
         "workspace with a group (opengrader share --group <group>, CLI "
-        "opengrader-share) and each grader runs opengrader tui <folder> from "
+        "opengrader share) and each grader runs opengrader tui <folder> from "
         "their own account: they join the professor's Opengrader, so only the "
         "professor's account writes the files, and the history shows who gave "
         "each grade. Graders grade where there is no grade and change their "
@@ -519,7 +519,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "is read with OCR, and with the handwriting model too when 'Read "
         "handwriting on scans' is on in AI setup (--llm-read-scans). On the "
         "start-up page, press t for copy-paste format templates. CLI: "
-        "create-answer-key.",
+        "opengrader create-answer-key.",
     ),
     (
         "Re-read unclear answers",
@@ -527,7 +527,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "the submissions holding a low-confidence transcription are re-read, "
         "and a new reading is kept only where it beats the old one. It uses "
         "the class folder and options set in Prepare an assignment. CLI: "
-        "submission-extractor --refine --refine-dpi 450.",
+        "opengrader submission-extractor --refine --refine-dpi 450.",
     ),
 ]
 
@@ -570,7 +570,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "model to load. Don't guess: press Test connection, which reports "
         "what this computer actually took and offers a roomier limit when "
         "the measurement is close to the one you have. Headless: "
-        "'doctor --time-ai' reports the same measurement.",
+        "'opengrader doctor --time-ai' reports the same measurement.",
     ),
     (
         "Only use suggestions I have measured",
@@ -608,7 +608,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "level — then names the minimum confidence the evidence supports and "
         "offers to save it into AI setup, where every tool picks it up. It "
         "never writes a grade. Headless: "
-        "'uv run llm-eval --solutions solutions.md --input <submissions>'.",
+        "'opengrader llm-eval --solutions solutions.md --input <submissions>'.",
     ),
     (
         "Handwritten math",
@@ -744,7 +744,7 @@ _TERMINAL_GRAPHICS_ROWS: list[tuple[str, str]] = [
     ),
     (
         "--check-graphics",
-        "uv run tui --check-graphics prints the protocol chosen, how it was "
+        "opengrader tui --check-graphics prints the protocol chosen, how it was "
         "detected, and the viewer that o would launch.",
     ),
     (
@@ -765,7 +765,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "optional Ollama server and its models, and whether this terminal can "
         "display answer crops. Run it on a new machine, and any time something "
         "misbehaves for no obvious reason. Add --smoke to build a template PDF "
-        "end to end. Read-only. CLI: doctor. Also in Tools (F3, classic) as "
+        "end to end. Read-only. CLI: opengrader doctor. Also in Tools (F3, classic) as "
         "'Check this computer', which on a Mac with Homebrew adds an Install "
         "Tesseract button when Tesseract is missing — the one thing there "
         "that changes this computer, and only when pressed.",
@@ -778,7 +778,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "variable that holds your key (never the key itself). Add one from a "
         "shipped example, test it, or remove it. A service that is not on "
         "this computer or your local network receives student work. Choose "
-        "the provider to use in AI setup. CLI: opengrader-providers. Also in "
+        "the provider to use in AI setup. CLI: opengrader providers. Also in "
         "Tools (F3, classic) as 'AI providers'.",
     ),
     (
@@ -786,7 +786,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "States, for the current AI setup, which kinds of student data would "
         "leave this computer and which host would receive them. Student names "
         "and IDs are never sent to a cloud service. Printable, to hand to a "
-        "department that asks. Read-only. CLI: opengrader-data-flow.",
+        "department that asks. Read-only. CLI: opengrader data-flow.",
     ),
     (
         "AI setup",
@@ -805,16 +805,16 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "tool. One command answers 'is this ready to hand back?' instead of "
         "running the review queue, the claims list, the regrade list and the "
         "curve separately. Exits 2 on anything blocking, so it can gate a "
-        "script. Read-only. CLI: grade-check.",
+        "script. Read-only. CLI: opengrader grade-check.",
     ),
     (
         "Grade release",
         "Record what every student was handed, then ask later what moved. "
-        "'grade-release create' snapshots each student's grade question by "
-        "question; 'grade-release diff' lists everything that has changed "
+        "'opengrader grade-release create' snapshots each student's grade question by "
+        "question; 'opengrader grade-release diff' lists everything that has changed "
         "since — a regrade, a re-curve, a merge. It never freezes a grade: "
         "releasing is precisely when regrades start, so the record exists to "
-        "explain changes, not to prevent them. CLI: grade-release. Also "
+        "explain changes, not to prevent them. CLI: opengrader grade-release. Also "
         "shift+L in the app.",
     ),
     (
@@ -833,7 +833,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "merely read off the scan it tells you and leaves them alone, since a "
         "misread number would move a page that was already correct. Page order "
         "can only be checked when --pages-per-submission or --blank-template "
-        "says how long a submission is. CLI: scan-check.",
+        "says how long a submission is. CLI: opengrader scan-check.",
     ),
     (
         "Photo import",
@@ -848,7 +848,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "filename (s1234-p1.jpg, s1234-p2.jpg), or set a fixed number of photos "
         "per student. HEIC (iPhone) photos need one extra install, and it names "
         "the command. Your photos are only ever read. In Tools (F3, classic) as "
-        "'Import phone photos'. CLI: photo-import.",
+        "'Import phone photos'. CLI: opengrader photo-import.",
     ),
     (
         "Region map",
@@ -867,18 +867,18 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "they answer the same question, so only one is used). A map is tied to "
         "the exact PDF it was drawn on and is refused on any other, because a "
         "re-export moves the boxes and a mis-crop is silent. "
-        "CLI: region-map propose/preview/validate, then submission-extractor "
+        "CLI: opengrader region-map propose/preview/validate, then opengrader submission-extractor "
         "--region-map.",
     ),
     (
         "Work claims",
         "Divide grading between several TAs so nobody marks a paper someone "
-        "else already did. claim divide --graders alice,bob,carol splits the "
-        "class into contiguous slices (by question, or by student); claim "
+        "else already did. opengrader claim divide --graders alice,bob,carol splits the "
+        "class into contiguous slices (by question, or by student); opengrader claim "
         "status shows coverage, gaps, and any work two people are both holding. "
         "Claiming work someone else holds is refused rather than silently "
         "double-booked. Coordination, not permission — it never blocks a save. "
-        "CLI: claim divide/add/list/status/release/complete.",
+        "CLI: opengrader claim divide/add/list/status/release/complete.",
     ),
     (
         "Share with a grader",
@@ -891,9 +891,9 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "three-way merge: answers only they graded are taken, answers only you "
         "graded are kept, and anything you both changed is shown for you to "
         "settle one row at a time. An applied merge can be undone with "
-        "grade-restore --without-actor merge:<name>. In the app: shift+E makes "
+        "opengrader grade-restore --without-actor merge:<name>. In the app: shift+E makes "
         "a copy and shift+M merges one back; also Share with another grader in "
-        "Tools (F3, classic). CLI: grade-merge pack/list/preview/apply.",
+        "Tools (F3, classic). CLI: opengrader grade-merge pack/list/preview/apply.",
     ),
     (
         "Backup & integrity",
@@ -906,7 +906,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "so normal growth is not noise but a rewritten history is flagged. The "
         "archive it writes is read back and verified before it claims success, "
         "and restoring always creates a new folder. In the app: shift+B; also "
-        "Backup & integrity on the start-up screen. CLI: grade-backup "
+        "Backup & integrity on the start-up screen. CLI: opengrader grade-backup "
         "snapshot/verify/backup/check/restore.",
     ),
     (
@@ -921,7 +921,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "reopening returns you to the same sequence — and only the traversal "
         "moves: the gradebook, exports and every report keep their usual order. "
         "Also the start-up screen's Set grading policy tool. "
-        "CLI: grading-policy.",
+        "CLI: opengrader grading-policy.",
     ),
     (
         "Workspace",
@@ -933,13 +933,13 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "given come along. Afterwards grade in the workspace, not the files: "
         "Launch Grading on that class asks first, and W in the workspace's "
         "assignment list copies its grades back into the files. "
-        "CLI: tui FOLDER makes one from a class folder.",
+        "CLI: opengrader tui FOLDER makes one from a class folder.",
     ),
     (
         "Needs review",
         "List submissions that likely need a human — probable OCR/extraction "
         "errors, missing/duplicate IDs, and low-confidence AI grades — most "
-        "severe first. Same list as the shift+R pop-up. CLI: review-queue.",
+        "severe first. Same list as the shift+R pop-up. CLI: opengrader review-queue.",
     ),
     (
         "Regrade requests",
@@ -948,7 +948,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "(add --student ID [--question qN] --reason ...); open requests surface "
         "at the top of the review queue and the shift+R pop-up, routing straight "
         "to the disputed question. Resolve or deny when done. "
-        "CLI: regrade add/list/resolve/deny.",
+        "CLI: opengrader regrade add/list/resolve/deny.",
     ),
     (
         "Calibrate AI grading",
@@ -960,7 +960,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "already graded by "
         "a previous AI run are excluded — scoring a model against its own "
         "earlier verdict measures repeatability, not accuracy. Read-only. Same "
-        "tool as the shift+A pop-up. CLI: llm-eval.",
+        "tool as the shift+A pop-up. CLI: opengrader llm-eval.",
     ),
     (
         "Check transcription accuracy",
@@ -972,11 +972,11 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "--llm-escalate. It measures only answers somebody checked, and says "
         "what share of the assignment that was — an answer nobody looked at is "
         "not evidence it was read correctly. Read-only. "
-        "CLI: transcribe-eval --input <submissions>.",
+        "CLI: opengrader transcribe-eval --input <submissions>.",
     ),
     (
         "Re-read only what OCR read badly",
-        "submission-extractor --llm-escalate reads every answer with the fast "
+        "opengrader submission-extractor --llm-escalate reads every answer with the fast "
         "local OCR first and asks the vision model only about the ones it read "
         "poorly or not at all, instead of sending every crop to the model. On "
         "an assignment whose answers are mostly short and legible that is a "
@@ -1015,31 +1015,31 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "adjust until it says what you mean. An assignment a student has no "
         "graded work for is left out of "
         "their average until you say missing = \"zero\". It reads your "
-        "assignment folders and never writes into them. CLI: course-grades.",
+        "assignment folders and never writes into them. CLI: opengrader course-grades.",
     ),
     (
         "Grade history",
         "Show the durable audit log of who changed which grade, from what to "
         "what, and when (all graders, all sessions). Same data as the shift+H "
-        "pop-up. CLI: grade-history.",
+        "pop-up. CLI: opengrader grade-history.",
     ),
     (
         "Grading stats",
         "Summarize grading throughput from that same journal — actions, active "
         "time, sessions, and pace per grader. Same view as the shift+V pop-up. "
-        "CLI: grading-stats.",
+        "CLI: opengrader grading-stats.",
     ),
     (
         "Calibrate",
-        "Are the graders marking this the same way? `calibrate pack --graders "
+        "Are the graders marking this the same way? `opengrader calibrate pack --graders "
         "alice,bob` cuts one anonymous, ungraded packet per grader, all "
         "holding the same sampled students under different codes, so everyone "
-        "marks the same answers independently — a norming round. `calibrate "
+        "marks the same answers independently — a norming round. `opengrader calibrate "
         "report --set <name>` compares the returned packets: who is harsher, "
         "how often they agree, and on which answers they split. With no --set "
         "it reads the audit journal instead, which needs no meeting and is the "
         "only source that can show drift over a session. Read-only apart from "
-        "pack. Same view as the shift+I pop-up. CLI: calibrate.",
+        "pack. Same view as the shift+I pop-up. CLI: opengrader calibrate.",
     ),
     (
         "Answer groups",
@@ -1049,7 +1049,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "prints each proposed merge with the differences between the answers "
         "marked, which is the same list the grade screen's shift+U view "
         "offers. "
-        "Read-only — it never merges or grades anything. CLI: answer-groups.",
+        "Read-only — it never merges or grades anything. CLI: opengrader answer-groups.",
     ),
     (
         "Grade restore",
@@ -1061,13 +1061,13 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "journalled, so it can be undone in turn. An automated-grading run "
         "records itself under 'automated-grading' (and 'automated-grading:llm' "
         "for AI-applied grades), so a bad batch can be dropped without "
-        "touching anyone's hand marking. CLI: grade-restore show/diff/apply/log.",
+        "touching anyone's hand marking. CLI: opengrader grade-restore show/diff/apply/log.",
     ),
     (
         "Bubble sheets (OMR)",
-        "For a large multiple-choice class: qa-file generate-template "
+        "For a large multiple-choice class: opengrader qa-file generate-template "
         "--bubble-sheet prints a scantron-style answer sheet (add --roster for "
-        "one QR-identified sheet per student), and submission-extractor "
+        "one QR-identified sheet per student), and opengrader submission-extractor "
         "--bubble-sheet QA_FILE reads the filled sheets back. Marks are "
         "measured, not recognized, so it needs no Tesseract, no vision model "
         "and no Ollama at all, and it is far faster than handwriting "
@@ -1094,13 +1094,13 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "Set a reversible assignment curve (bonus / scale / square-root) applied "
         "to every export and the summary page, raw shown alongside. Or solve for "
         "a target class average and let it pick the value. Same editor as the "
-        "QA picker's c pop-up. CLI: curve show/set/suggest/clear.",
+        "QA picker's c pop-up. CLI: opengrader curve show/set/suggest/clear.",
     ),
     (
         "Consistency audit",
         "Flag answer groups where students who gave the same answer received "
         "different grades — the fairness check to run before export. Same list "
-        "as the shift+C pop-up. CLI: consistency-audit.",
+        "as the shift+C pop-up. CLI: opengrader consistency-audit.",
     ),
     (
         "Similarity audit",
@@ -1110,26 +1110,26 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "more often than the class's own spread of wrong answers allows — the "
         "only integrity check a bubble sheet can have, since a text diff calls "
         "every honest pair 100% alike on 'B'. Same views as the shift+P pop-up. "
-        "CLI: similarity-audit (add --solutions for the objective half).",
+        "CLI: opengrader similarity-audit (add --solutions for the objective half).",
     ),
     (
         "Item analysis",
         "Per-question difficulty and separation (discrimination), plus "
         "multiple-choice distractor breakdowns — which questions to fix or "
-        "reuse. Same view as the shift+S pop-up. CLI: item-analysis.",
+        "reuse. Same view as the shift+S pop-up. CLI: opengrader item-analysis.",
     ),
     (
         "Canvas export",
         "Post scores and per-question comments to Canvas via canvas-sak "
         "(dry run by default). Press x in the QA picker. "
-        "CLI: canvas-export.",
+        "CLI: opengrader canvas-export.",
     ),
     (
         "Return bundle",
         "Package the class into one hand-back folder: gradebook CSV, each "
         "student's annotated + summarized PDF, and a class analysis report. "
         "Pick which documents from the dropdown. Press b in the QA picker. "
-        "CLI: return-bundle (or grades-export for just the CSV).",
+        "CLI: opengrader return-bundle (or opengrader grades-export for just the CSV).",
     ),
     (
         "Returnable PDF",
@@ -1145,7 +1145,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "for reliable auto-splitting/reordering (identical sheets), or add a "
         "roster to reveal per-student options: one anonymous QR sheet per student "
         "(prints the id, not the name) plus a teacher master key (id -> name) on "
-        "page 1. CLI: qa-file generate-template --qr / --roster.",
+        "page 1. CLI: opengrader qa-file generate-template --qr / --roster.",
     ),
 ]
 
@@ -1204,10 +1204,9 @@ def _sections() -> list[_Section]:
             "Prepare an assignment: one card on the start-up screen "
             "takes a scan all the way to graded work, and running it "
             "again does only what is left. Each stage is also a "
-            "command for a terminal: uv run opengrader --help lists "
-            "every one, and uv run opengrader <command> --help "
-            "explains one. The standalone names (uv run "
-            "submission-splitter, …) still work too.",
+            "command for a terminal: opengrader --help lists "
+            "every one, and opengrader <command> --help "
+            "explains one.",
             _PIPELINE_ROWS,
             key_class="help-tool",
         ),
@@ -1224,7 +1223,7 @@ def _sections() -> list[_Section]:
         _Section(
             "TERMINAL IMAGES",
             "How answer crops get drawn, and what to do when they "
-            "don't. Run tui --check-graphics to see what was detected.",
+            "don't. Run opengrader tui --check-graphics to see what was detected.",
             _TERMINAL_GRAPHICS_ROWS,
             key_class="help-tool",
         ),

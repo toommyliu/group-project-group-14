@@ -40,16 +40,16 @@ _PAUSE_TAGS = frozenset(
 EPILOG = """\
 \b
 Examples:
-  uv run opengrader-run cs146-quiz1/                    # finds the scan, answer key, roster, template
-  uv run opengrader-run cs146-quiz1/ --qa other-key.md  # any flag overrides what was found
-  uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/
-  uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --pages-per-submission 6
-  uv run opengrader-run --scan split/ --qa qa.md --out cohort/          # already-split PDFs
-  uv run opengrader-run --scan scans/bundle.pdf --out cohort/ --dry-run # show the plan, do nothing
-  uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm
-  uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
-  uv run opengrader-run cs146-quiz1/ --draft-rubrics    # AI drafts missing rubric items, then pauses
-  uv run opengrader-run --section-scan s1.pdf --section-scan s2.pdf --qa qa.md --out quiz1/
+  opengrader run cs146-quiz1/                    # finds the scan, answer key, roster, template
+  opengrader run cs146-quiz1/ --qa other-key.md  # any flag overrides what was found
+  opengrader run --scan scans/bundle.pdf --qa qa.md --out cohort/
+  opengrader run --scan scans/bundle.pdf --qa qa.md --out cohort/ --pages-per-submission 6
+  opengrader run --scan split/ --qa qa.md --out cohort/          # already-split PDFs
+  opengrader run --scan scans/bundle.pdf --out cohort/ --dry-run # show the plan, do nothing
+  opengrader run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm
+  opengrader run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
+  opengrader run cs146-quiz1/ --draft-rubrics    # AI drafts missing rubric items, then pauses
+  opengrader run --section-scan s1.pdf --section-scan s2.pdf --qa qa.md --out quiz1/
 
 \b
 Class folder:
@@ -311,8 +311,6 @@ def _print_summary(report: PipelineReport) -> None:
                 "Open for grading: "
                 + shlex.join(
                     [
-                        "uv",
-                        "run",
                         "opengrader",
                         "tui",
                         "--workspace",
@@ -909,7 +907,7 @@ def _save_inputs(
     type=float,
     help=(
         "Only write AI grade suggestions at or above this confidence (0-1). "
-        "Run 'llm-eval' on already-graded work to find the right value."
+        "Run 'opengrader llm-eval' on already-graded work to find the right value."
     ),
 )
 @click.option(

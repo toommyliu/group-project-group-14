@@ -19,10 +19,10 @@ from opengrader.core.submissions.student_file import load_student_submission_mar
 EPILOG = """\
 \b
 Examples:
-  uv run consistency-audit --input out/student-submissions/
-  uv run consistency-audit --input out/student-submissions/ --include-blank
-  uv run consistency-audit --input out/student-submissions/ --json
-  uv run consistency-audit --input out/student-submissions/ --fail-on-inconsistency
+  opengrader consistency-audit --input out/student-submissions/
+  opengrader consistency-audit --input out/student-submissions/ --include-blank
+  opengrader consistency-audit --input out/student-submissions/ --json
+  opengrader consistency-audit --input out/student-submissions/ --fail-on-inconsistency
 """
 
 _SEVERITY_GLYPH = {"high": "●", "low": "○"}

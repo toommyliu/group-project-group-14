@@ -19,11 +19,11 @@ from opengrader.core.policy import GradingPolicy, read_policy, write_policy
 EPILOG = """\
 \b
 Examples:
-  uv run grading-policy show --submissions out/student-submissions/
-  uv run grading-policy lock --submissions out/student-submissions/
-  uv run grading-policy unlock --submissions out/student-submissions/
-  uv run grading-policy redact-names --submissions out/subs/ --name-map names.json
-  uv run grading-policy restore-names --submissions out/subs/ --name-map names.json
+  opengrader grading-policy show --submissions out/student-submissions/
+  opengrader grading-policy lock --submissions out/student-submissions/
+  opengrader grading-policy unlock --submissions out/student-submissions/
+  opengrader grading-policy redact-names --submissions out/subs/ --name-map names.json
+  opengrader grading-policy restore-names --submissions out/subs/ --name-map names.json
 """
 
 _submissions_option = click.option(

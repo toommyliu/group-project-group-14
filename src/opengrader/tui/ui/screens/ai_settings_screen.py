@@ -177,7 +177,7 @@ class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
                 yield Static(
                     "These switches are what every tool reads — including "
                     "submission-extractor, automated-grading and "
-                    "opengrader-run started from a plain terminal — so this "
+                    "opengrader run started from a plain terminal — so this "
                     "is where the AI is turned on, not a per-run question "
                     "any more.",
                     classes="ai-note",

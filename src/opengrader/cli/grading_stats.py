@@ -20,10 +20,10 @@ from opengrader.core.history import read_journal, resolve_history_dir
 EPILOG = """\
 \b
 Examples:
-  uv run grading-stats --input out/student-submissions/
-  uv run grading-stats --input out/student-submissions/ --actor prof_kim
-  uv run grading-stats --input out/student-submissions/ --idle-gap 600
-  uv run grading-stats --input out/student-submissions/ --json
+  opengrader grading-stats --input out/student-submissions/
+  opengrader grading-stats --input out/student-submissions/ --actor prof_kim
+  opengrader grading-stats --input out/student-submissions/ --idle-gap 600
+  opengrader grading-stats --input out/student-submissions/ --json
 """
 
 

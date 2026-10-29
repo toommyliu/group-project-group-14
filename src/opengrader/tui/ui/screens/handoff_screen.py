@@ -897,7 +897,7 @@ class MergeScreen(OutlineButtons, ModalScreen[bool]):
             lines += [f"  {change.describe()} — {error}" for change, error in outcome.failed]
         lines.append("")
         lines.append(
-            "Undo with:  grade-restore apply --submissions <folder> "
+            "Undo with:  opengrader grade-restore apply --submissions <folder> "
             + " ".join(f"--without-actor {name}" for name in undo_actors)
             + " --yes"
         )

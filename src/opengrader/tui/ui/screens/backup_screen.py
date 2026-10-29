@@ -188,7 +188,7 @@ class BackupScreen(OutlineButtons, ModalScreen[None]):
                     "Record a checksum of every file now, and later ask what moved. "
                     "Or write one archive of the lot — it is read back and verified "
                     "before this says it worked. To unpack an archive, use "
-                    "'grade-backup restore' in a terminal: it creates a new folder, "
+                    "'opengrader grade-backup restore' in a terminal: it creates a new folder, "
                     "which this session would not be pointing at.",
                     id="backup-hint",
                 )

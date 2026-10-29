@@ -36,18 +36,18 @@ EPILOG = """\
 \b
 Examples:
   # Before dividing the pile: everyone marks the same 8 answers, blind.
-  uv run calibrate pack --submissions out/student-submissions/ \\
+  opengrader calibrate pack --submissions out/student-submissions/ \\
       --graders alice,bob,carol --sample 8 --qa-file qa.md
-  uv run calibrate list --submissions out/student-submissions/
+  opengrader calibrate list --submissions out/student-submissions/
 
 \b
   # After the packets come back.
-  uv run calibrate report --submissions out/student-submissions/ --set calibration-2026-08-05
+  opengrader calibrate report --submissions out/student-submissions/ --set calibration-2026-08-05
 
 \b
   # No meeting: read the grading that already happened out of the journal.
-  uv run calibrate report --submissions out/student-submissions/
-  uv run calibrate report --submissions out/student-submissions/ --json
+  opengrader calibrate report --submissions out/student-submissions/
+  opengrader calibrate report --submissions out/student-submissions/ --json
 """
 
 _BASIS_LABEL: dict[OverlapBasis, str] = {
@@ -127,7 +127,7 @@ def _print_report(report: GraderAgreementReport, *, source: str) -> None:
             "\nNo two graders marked comparable work, so they cannot be compared.\n"
             "Each grader's residual above is relative to a norm they are the only\n"
             "contributor to, which is why it sits near zero. Run\n"
-            "  uv run calibrate pack --graders <names>\n"
+            "  opengrader calibrate pack --graders <names>\n"
             "to have everyone mark the same sample."
         )
     if report.unweighted_answers:
@@ -314,7 +314,7 @@ def pack_command(
     print(
         "\nHand each grader their own folder. They grade it with the ordinary TUI\n"
         "(see the README.txt inside), then hand it back and you run:\n"
-        f"  uv run calibrate report --submissions {submissions} --set {record.set_id}\n"
+        f"  opengrader calibrate report --submissions {submissions} --set {record.set_id}\n"
         "\nEach grader sees different codes for the same student, so comparing\n"
         "notes cannot anchor them to each other."
     )
@@ -397,7 +397,7 @@ def report_command(
             named = f" named {set_id}" if set_id else ""
             print(
                 f"Error: no calibration set{named} for {submissions}. "
-                "Run `calibrate list` to see what exists.",
+                "Run `opengrader calibrate list` to see what exists.",
                 file=sys.stderr,
             )
             sys.exit(1)

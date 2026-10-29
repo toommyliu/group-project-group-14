@@ -232,7 +232,7 @@ def test_a_finished_run_prints_how_to_open_it(tmp_path, captured, capsys) -> Non
     )
     out = capsys.readouterr().out
     assert "2 submission(s) ready" in out
-    assert "uv run opengrader tui --workspace" in out
+    assert "opengrader tui --workspace" in out
     assert f"--assignment {captured['publication'][2]}" in out
     assert captured["publication"][1] == workspace
 

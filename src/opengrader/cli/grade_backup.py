@@ -30,13 +30,13 @@ from opengrader.core.integrity import (
 EPILOG = """\
 \b
 Examples:
-  uv run grade-backup snapshot --submissions out/subs/
-  uv run grade-backup verify   --submissions out/subs/
-  uv run grade-backup verify   --submissions out/subs/ --fail-on-change
-  uv run grade-backup backup   --submissions out/subs/ --output ~/backups/quiz1.zip
-  uv run grade-backup check    --archive ~/backups/quiz1.zip
-  uv run grade-backup restore  --archive ~/backups/quiz1.zip --output ~/recovered/
-  uv run grade-backup backup   --submissions out/subs/ --encrypt
+  opengrader grade-backup snapshot --submissions out/subs/
+  opengrader grade-backup verify   --submissions out/subs/
+  opengrader grade-backup verify   --submissions out/subs/ --fail-on-change
+  opengrader grade-backup backup   --submissions out/subs/ --output ~/backups/quiz1.zip
+  opengrader grade-backup check    --archive ~/backups/quiz1.zip
+  opengrader grade-backup restore  --archive ~/backups/quiz1.zip --output ~/recovered/
+  opengrader grade-backup backup   --submissions out/subs/ --encrypt
 
 \b
 Encryption:

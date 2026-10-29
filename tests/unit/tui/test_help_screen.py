@@ -77,32 +77,25 @@ def _help_text() -> str:
 
 
 def test_every_command_line_tool_is_documented() -> None:
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
-    scripts = set(tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["scripts"])
+    from opengrader.cli.main import COMMANDS
 
     text = _help_text()
     undocumented = sorted(
-        name for name in scripts if name not in text
+        spec.name for spec in COMMANDS if spec.name not in text
     )
     assert undocumented == [], f"no help entry names these tools: {undocumented}"
 
 
 def test_no_help_entry_names_a_tool_that_does_not_exist() -> None:
     import re
-    import tomllib
-    from pathlib import Path
 
-    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
-    scripts = set(tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["scripts"])
+    from opengrader.cli.main import find
 
     named = set()
     for rows in _row_tables().values():
         for _key, description in rows:
-            named.update(re.findall(r"CLI: ([a-z0-9-]+)", description))
-    assert named - scripts == set()
+            named.update(re.findall(r"CLI: opengrader ([a-z0-9-]+)", description))
+    assert sorted(name for name in named if find(name) is None) == []
 
 
 def test_every_hotkey_in_the_help_is_a_real_binding() -> None:

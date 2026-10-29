@@ -393,8 +393,8 @@ def apply_command(
 ) -> None:
     """Merge the assistant's suggestions back (run by the teacher).
 
-    The same three-way merge as 'grade-merge apply': an answer you graded
-    meanwhile is never overwritten, and 'grade-restore' can undo it. In a
+    The same three-way merge as 'opengrader grade-merge apply': an answer you graded
+    meanwhile is never overwritten, and 'opengrader grade-restore' can undo it. In a
     workspace such an answer gets a change request instead, for you to
     approve or dismiss (Q while grading).
     """
@@ -421,7 +421,7 @@ def apply_command(
             "\nThe assistant's grades are marked as AI grades. In the grading app, "
             "press v on a question to step through the ones not yet confirmed and "
             "y to confirm each (or pick another rubric option to change it). "
-            "grade-check and the review queue flag low-confidence ones."
+            "opengrader grade-check and the review queue flag low-confidence ones."
         )
         pending = [s for s in list_suggestions(Path(raw_incoming)) if not s.decision]
         if pending:

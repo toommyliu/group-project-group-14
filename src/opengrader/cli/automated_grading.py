@@ -37,17 +37,17 @@ from opengrader.core.grading.ownership import AutoGrades
 EPILOG = """\
 \b
 Examples:
-  uv run automated-grading --solutions solutions.md --input student-0001.submission.md
-  uv run automated-grading --solutions solutions.md --input ./student-submissions/
-  uv run automated-grading --solutions Solutions/solutions.md --input samples/student_responses.md
-  uv run automated-grading --solutions Solutions/final_solutions.md --input ./Solutions/student_submissions/
-  uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm
-  uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm --llm-model llama3.1 --llm-min-confidence 0.8
-  uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm --dry-run
+  opengrader automated-grading --solutions solutions.md --input student-0001.submission.md
+  opengrader automated-grading --solutions solutions.md --input ./student-submissions/
+  opengrader automated-grading --solutions Solutions/solutions.md --input samples/student_responses.md
+  opengrader automated-grading --solutions Solutions/final_solutions.md --input ./Solutions/student_submissions/
+  opengrader automated-grading --solutions solutions.md --input ./student-submissions/ --llm
+  opengrader automated-grading --solutions solutions.md --input ./student-submissions/ --llm --llm-model llama3.1 --llm-min-confidence 0.8
+  opengrader automated-grading --solutions solutions.md --input ./student-submissions/ --llm --dry-run
 
 \b
 Pick --llm-min-confidence from evidence, not from a guess:
-  uv run llm-eval --solutions solutions.md --input ./student-submissions/
+  opengrader llm-eval --solutions solutions.md --input ./student-submissions/
 """
 
 
@@ -172,7 +172,7 @@ class _Hooks:
     help=(
         "Only write AI suggestions at or above this confidence (0-1); "
         "weaker ones are left for manual grading. "
-        "Run 'llm-eval' against already-graded submissions to find the "
+        "Run 'opengrader llm-eval' against already-graded submissions to find the "
         "value your model and assignment actually support."
     ),
 )
@@ -211,7 +211,7 @@ class _Hooks:
     is_flag=True,
     help=(
         "Do not record this run in the audit journal. Off by default: "
-        "journalling is what lets 'grade-restore' undo a bad batch."
+        "journalling is what lets 'opengrader grade-restore' undo a bad batch."
     ),
 )
 @click.option(
@@ -340,7 +340,7 @@ def command(
                 "items yet, so the AI can only choose Correct, Partially Correct "
                 "or Incorrect there. For finer partial credit, draft them first "
                 "and review them:\n"
-                f"  uv run draft-rubric --solutions {solutions_path} --input {input_path} --write"
+                f"  opengrader draft-rubric --solutions {solutions_path} --input {input_path} --write"
             )
 
     total = len(paths)
@@ -397,10 +397,10 @@ def command(
     if run_journal is not None:
         print(
             "\nThis run was recorded in the audit journal. To undo it:\n"
-            f"  uv run grade-restore apply --submissions {input_path} "
+            f"  opengrader grade-restore apply --submissions {input_path} "
             f"--without-actor {JOURNAL_ACTOR_AUTO} --yes"
             + (
-                f"\n  uv run grade-restore apply --submissions {input_path} "
+                f"\n  opengrader grade-restore apply --submissions {input_path} "
                 f"--without-actor {JOURNAL_ACTOR_LLM} --yes   # AI grades only"
                 if llm_generate is not None
                 else ""

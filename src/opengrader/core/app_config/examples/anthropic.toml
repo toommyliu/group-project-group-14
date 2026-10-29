@@ -1,4 +1,4 @@
-# Install with: opengrader-providers add --example anthropic
+# Install with: opengrader providers add --example anthropic
 
 name         = "anthropic"
 label        = "Anthropic"

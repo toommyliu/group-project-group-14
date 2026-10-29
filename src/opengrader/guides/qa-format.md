@@ -276,10 +276,10 @@ live — the submissions carry only points):
 
 | Where | How |
 | --- | --- |
-| `item-analysis --solutions solutions.md` | a per-outcome mastery section |
-| `grades-export --solutions solutions.md` | one `outcome:<NAME> %` column per outcome |
-| `return-bundle --solutions solutions.md` | a Learning outcomes page in the analysis PDF |
-| `course-grades --course course.toml` | mastery pooled across every assignment |
+| `opengrader item-analysis --solutions solutions.md` | a per-outcome mastery section |
+| `opengrader grades-export --solutions solutions.md` | one `outcome:<NAME> %` column per outcome |
+| `opengrader return-bundle --solutions solutions.md` | a Learning outcomes page in the analysis PDF |
+| `opengrader course-grades --course course.toml` | mastery pooled across every assignment |
 
 Mastery is measured in **points, not questions** — an outcome carried by a
 20-point essay and a 2-point definition is dominated by the essay, which is what

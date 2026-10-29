@@ -30,8 +30,8 @@ _submission_paths = discover_submission_paths
 EPILOG = """\
 \b
 Examples:
-  uv run grades-export --submissions samples/cs146-quiz1/student-submissions/
-  uv run grades-export --submissions samples/cs146-quiz1/student-submissions/ --output grades.csv
+  opengrader grades-export --submissions samples/cs146-quiz1/student-submissions/
+  opengrader grades-export --submissions samples/cs146-quiz1/student-submissions/ --output grades.csv
 """
 
 

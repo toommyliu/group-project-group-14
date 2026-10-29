@@ -25,11 +25,11 @@ from opengrader.core.submissions.student_file import load_student_submission_mar
 EPILOG = """\
 \b
 Examples:
-  uv run review-queue --input out/student-submissions/
-  uv run review-queue --input out/student-submissions/ --include-ungraded
-  uv run review-queue --input out/student-submissions/ --ai-confidence 90
-  uv run review-queue --input out/student-submissions/ --roster roster.tsv
-  uv run review-queue --input out/student-submissions/ --json
+  opengrader review-queue --input out/student-submissions/
+  opengrader review-queue --input out/student-submissions/ --include-ungraded
+  opengrader review-queue --input out/student-submissions/ --ai-confidence 90
+  opengrader review-queue --input out/student-submissions/ --roster roster.tsv
+  opengrader review-queue --input out/student-submissions/ --json
 """
 
 _SEVERITY_GLYPH = {"high": "●", "medium": "◐", "low": "○"}
@@ -137,7 +137,7 @@ def _flag_to_dict(flag: ReviewFlag) -> dict[str, str]:
     "--roster",
     help=(
         "Tab-separated roster file ('ID<TAB>NAME' per line, the same file "
-        "passed to submission-extractor --id-file). Roster students with no "
+        "passed to opengrader submission-extractor --id-file). Roster students with no "
         "matching submission are flagged, catching assignments that were never "
         "scanned or extracted before grades reach Canvas."
     ),

@@ -40,21 +40,21 @@ from opengrader.core.submissions import load_student_submission_markdown
 EPILOG = """\
 \b
 Examples:
-  uv run llm-eval --solutions solutions.md --input out/student-submissions/
-  uv run llm-eval --solutions solutions.md --input out/student-submissions/ --llm-model llama3.1 --llm-model mistral
-  uv run llm-eval --solutions solutions.md --input out/student-submissions/ --target-agreement 0.95
-  uv run llm-eval --solutions solutions.md --input out/student-submissions/ --limit 40 --json
+  opengrader llm-eval --solutions solutions.md --input out/student-submissions/
+  opengrader llm-eval --solutions solutions.md --input out/student-submissions/ --llm-model llama3.1 --llm-model mistral
+  opengrader llm-eval --solutions solutions.md --input out/student-submissions/ --target-agreement 0.95
+  opengrader llm-eval --solutions solutions.md --input out/student-submissions/ --limit 40 --json
 
 \b
 Pool past classes of the same assignment for a bigger sample (one shared answer key):
-  uv run llm-eval --solutions solutions.md \\
+  opengrader llm-eval --solutions solutions.md \\
       --input 2026-spring/student-submissions/ \\
       --input 2025-fall/student-submissions/ \\
       --input 2025-spring/student-submissions/
 
 \b
 Then grade with the number it suggests:
-  uv run automated-grading --solutions solutions.md --input out/student-submissions/ --llm --llm-min-confidence 0.85
+  opengrader automated-grading --solutions solutions.md --input out/student-submissions/ --llm --llm-min-confidence 0.85
 
 Read-only: this never writes a grade. It only asks the model to re-grade answers
 a human already marked, and compares.
@@ -572,7 +572,7 @@ def _default_generate_factory(
     help=(
         "Exclude answers whose OCR transcription confidence is below this "
         "(0-100). Must match what "
-        "'automated-grading' runs with, since a threshold is only valid "
+        "'opengrader automated-grading' runs with, since a threshold is only valid "
         "for the population production actually grades."
     ),
 )
@@ -614,7 +614,7 @@ def command(
     """Measure how well an LLM grades free responses, by re-grading answers
     a human already marked. Reports agreement per model, per question type
     and per confidence bucket, then recommends an evidence-based
-    --llm-min-confidence for automated-grading. Read-only: no grade is ever
+    --llm-min-confidence for opengrader automated-grading. Read-only: no grade is ever
     written.
     """
     solutions_path = Path(solutions)

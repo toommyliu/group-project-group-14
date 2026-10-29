@@ -31,13 +31,13 @@ from opengrader.core.submissions.student_file import load_student_submission_mar
 EPILOG = """\
 \b
 Examples:
-  uv run grade-restore show --submissions out/subs/ --at 2026-08-02T12:00
-  uv run grade-restore show --submissions out/subs/ --at 2h --student 012345
-  uv run grade-restore diff --submissions out/subs/ --at 90m
-  uv run grade-restore apply --submissions out/subs/ --at 2026-08-02T12:00 --yes
-  uv run grade-restore apply --submissions out/subs/ --question q3 --at 1d --yes
-  uv run grade-restore apply --submissions out/subs/ --without-actor bot --yes
-  uv run grade-restore log --submissions out/subs/          # who touched what, when
+  opengrader grade-restore show --submissions out/subs/ --at 2026-08-02T12:00
+  opengrader grade-restore show --submissions out/subs/ --at 2h --student 012345
+  opengrader grade-restore diff --submissions out/subs/ --at 90m
+  opengrader grade-restore apply --submissions out/subs/ --at 2026-08-02T12:00 --yes
+  opengrader grade-restore apply --submissions out/subs/ --question q3 --at 1d --yes
+  opengrader grade-restore apply --submissions out/subs/ --without-actor bot --yes
+  opengrader grade-restore log --submissions out/subs/          # who touched what, when
 
 \b
 Times:

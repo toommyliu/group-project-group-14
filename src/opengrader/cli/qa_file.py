@@ -23,11 +23,11 @@ from opengrader.core.roster import load_roster_students
 EPILOG = """\
 \b
 Examples:
-  uv run qa-file validate --qa-file samples/cmpe195a-quiz1/qa.md
-  uv run qa-file validate --qa-file samples/cmpe195a-quiz2-multiple-choice/qa.md
-  uv run qa-file generate-template --qa-file samples/cmpe195a-quiz1/qa.md --output-pdf out/template-single.pdf
-  uv run qa-file generate-template --qa-file samples/cmpe195a-quiz2-multiple-choice/qa.md --output-pdf out/template-mc.pdf
-  uv run qa-file generate-template --qa-file samples/cs146-quiz1/qa.md --output-pdf out/template-multi.pdf --all-versions
+  opengrader qa-file validate --qa-file samples/cmpe195a-quiz1/qa.md
+  opengrader qa-file validate --qa-file samples/cmpe195a-quiz2-multiple-choice/qa.md
+  opengrader qa-file generate-template --qa-file samples/cmpe195a-quiz1/qa.md --output-pdf out/template-single.pdf
+  opengrader qa-file generate-template --qa-file samples/cmpe195a-quiz2-multiple-choice/qa.md --output-pdf out/template-mc.pdf
+  opengrader qa-file generate-template --qa-file samples/cs146-quiz1/qa.md --output-pdf out/template-multi.pdf --all-versions
 """
 
 
@@ -258,7 +258,7 @@ def fill_answers_command(qa_file: str, answers_file: Path) -> None:
         "Generate a machine-readable bubble answer sheet instead of a "
         "written-answer template: one row of circles per multiple-choice "
         "question, with corner registration marks. Read back by "
-        "'submission-extractor --bubble-sheet' with no OCR and no AI. "
+        "'opengrader submission-extractor --bubble-sheet' with no OCR and no AI. "
         "Non-multiple-choice questions cannot be bubbled and are skipped "
         "(they are listed when that happens). Combines with --roster for "
         "one personalized, QR-identified sheet per student."

@@ -53,8 +53,8 @@ In the app: **Tools → AI setup**.
 
 From a terminal, `opengrader doctor` checks the same things and prints the
 command that fixes each problem. Every tool then uses the setting:
-`opengrader run --llm`, `submission-extractor --llm-responses`,
-`automated-grading --llm`.
+`opengrader run --llm`, `opengrader submission-extractor --llm-responses`,
+`opengrader automated-grading --llm`.
 
 If a run says the AI is not answering, start Ollama (step 2) and run it again.
 Opengrader never starts Ollama itself.

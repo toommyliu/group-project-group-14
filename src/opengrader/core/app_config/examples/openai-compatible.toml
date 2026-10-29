@@ -1,4 +1,4 @@
-# Install with: opengrader-providers add --example openai-compatible
+# Install with: opengrader providers add --example openai-compatible
 # Replace the name, host, models, and credential variable for your gateway.
 
 name         = "campus-gateway"

@@ -21,10 +21,10 @@ from opengrader.core.submissions import (
 EPILOG = """\
 \b
 Examples:
-  uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --dry-run
-  uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1"
-  uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --attach-pdf
-  uv run canvas-export --submissions quiz1/submissions/ --course "CS146-01" --assignment "Quiz 1" --section "Section 01"
+  opengrader canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --dry-run
+  opengrader canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1"
+  opengrader canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --attach-pdf
+  opengrader canvas-export --submissions quiz1/submissions/ --course "CS146-01" --assignment "Quiz 1" --section "Section 01"
 
 \b
 Sections:
