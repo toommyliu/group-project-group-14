@@ -1,6 +1,6 @@
 [project]
 name = "opengrader"
-version = "0.0.1"
+version = "0.1.0"
 description = "Grade paper assignments faster, right on your own computer"
 readme = "README.md"
 authors = [
