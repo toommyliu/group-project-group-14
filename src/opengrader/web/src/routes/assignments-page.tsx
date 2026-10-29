@@ -6,7 +6,7 @@ import {
   useRouterState,
 } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CircleCheck, LoaderCircle } from 'lucide-react';
+import { ArrowRight, CircleCheck, LoaderCircle, PenLine } from 'lucide-react';
 import {
   assignmentSummariesQuery,
   type AssignmentSummary,
@@ -199,6 +199,14 @@ function AssignmentCard({
     assignment.version_count > 0 && count(assignment.version_count, 'version'),
     count(assignment.submission_count, 'submission'),
   ].filter(Boolean);
+  const gradingLabel =
+    assignment.response_count === 0
+      ? undefined
+      : assignment.graded_response_count === 0
+        ? 'Start grading'
+        : assignment.graded_response_count < assignment.response_count
+          ? 'Continue grading'
+          : 'Review grades';
   return (
     <article className="group relative flex h-full flex-col gap-5 rounded-lg border p-5 tabular-nums has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-foreground has-[a:hover]:bg-muted/40 motion-safe:transition-colors motion-safe:duration-150">
       <div className="flex items-start justify-between gap-4">
@@ -299,6 +307,20 @@ function AssignmentCard({
           )}
         </dd>
       </dl>
+      {gradingLabel && (
+        <Link
+          to="/assignments/$assignmentId/grade"
+          params={{ assignmentId: assignment.id }}
+          search={{}}
+          className={buttonVariants({
+            variant: complete ? 'outline' : 'default',
+            className: 'relative z-10 w-full',
+          })}
+        >
+          <PenLine aria-hidden="true" />
+          {gradingLabel}
+        </Link>
+      )}
     </article>
   );
 }

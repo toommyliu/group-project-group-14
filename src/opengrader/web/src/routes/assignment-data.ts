@@ -8,6 +8,7 @@ import {
   type Assignment,
 } from '@/api/queries';
 import { assignmentNotFound, submissionNotFound } from '@/lib/not-found';
+import { firstUngraded } from '@/lib/grading';
 
 export type GradingSearch = { submission?: number; question?: string };
 
@@ -52,9 +53,14 @@ export async function loadAssignment(
   const submissions = await client.ensureQueryData(
     submissionsQuery(assignmentId)
   );
+  const resume =
+    search.submission === undefined && search.question === undefined
+      ? firstUngraded(submissions)
+      : undefined;
   const submission =
     search.submission === undefined
-      ? submissions[0]
+      ? (submissions.find((item) => item.id === resume?.submission) ??
+        submissions[0])
       : submissions.find((item) => item.id === search.submission);
   if (search.submission !== undefined && !submission)
     throw submissionNotFound();
@@ -62,7 +68,8 @@ export async function loadAssignment(
     ? await client.ensureQueryData(questionsQuery(assignmentId, submission.id))
     : [];
   const question =
-    questions.find((item) => item.id === search.question) ?? questions[0];
+    questions.find((item) => item.id === (search.question ?? resume?.question)) ??
+    questions[0];
   let answer = null;
   if (submission && question) {
     try {

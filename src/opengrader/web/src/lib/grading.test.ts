@@ -1,6 +1,11 @@
 import { expect, it } from 'vitest';
 import type { Question, Submission } from '@/api/queries';
-import { nextUngraded, rubricScore, selectRubric } from './grading';
+import {
+  firstUngraded,
+  nextUngraded,
+  rubricScore,
+  selectRubric,
+} from './grading';
 
 const question: Question = {
   id: 'q1',
@@ -115,4 +120,46 @@ it('wraps the ungraded queue, skipping zero scores, missing responses, and the c
   expect(nextUngraded(submissions, 1, 'q1')?.id).toBe(4);
   expect(nextUngraded(submissions, 4, 'q1')?.id).toBe(1);
   expect(nextUngraded(submissions.slice(0, 3), 1, 'q1')).toBeUndefined();
+});
+
+it('selects the first ungraded response across submissions and questions', () => {
+  const submissions: Submission[] = [
+    {
+      student_name: '',
+      student_id: '',
+      id: 1,
+      version: null,
+      name_image_url: null,
+      id_image_url: null,
+      match_percent: null,
+      candidates: [],
+      question_scores: { q1: 0, q2: 5 },
+    },
+    {
+      student_name: '',
+      student_id: '',
+      id: 2,
+      version: 'B',
+      name_image_url: null,
+      id_image_url: null,
+      match_percent: null,
+      candidates: [],
+      question_scores: { q1: 3, q2: null, q3: null },
+    },
+  ];
+
+  expect(firstUngraded(submissions)).toEqual({
+    submission: 2,
+    question: 'q2',
+  });
+  expect(
+    firstUngraded(
+      submissions.map((submission) => ({
+        ...submission,
+        question_scores: Object.fromEntries(
+          Object.keys(submission.question_scores).map((id) => [id, 0])
+        ),
+      }))
+    )
+  ).toBeUndefined();
 });

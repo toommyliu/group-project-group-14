@@ -1,5 +1,24 @@
 import type { Question, Submission } from '@/api/queries';
 
+export type GradingSelection = {
+  submission: number;
+  question: string;
+};
+
+/** Find the first response that still needs a grade in display order. */
+export function firstUngraded(
+  submissions: Submission[]
+): GradingSelection | undefined {
+  for (const submission of submissions) {
+    for (const [question, score] of Object.entries(
+      submission.question_scores
+    )) {
+      if (score === null) return { submission: submission.id, question };
+    }
+  }
+  return undefined;
+}
+
 export function selectRubric(
   question: Question,
   labels: string[],
