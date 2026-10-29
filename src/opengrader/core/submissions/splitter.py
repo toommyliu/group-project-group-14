@@ -7,7 +7,8 @@ from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 
-from .scan_notes import SCAN_WARNINGS_SUFFIX, read_note_path, write_note
+from .extra_pages import read_extra_pages_map, write_extra_pages_map
+from .scan_notes import SCAN_WARNINGS_SUFFIX, read_note_path, remove_note, write_note
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,8 @@ def split_scanned_submission_pdf(
     output_dir: str | Path,
     ranges: list[SubmissionPageRange],
 ) -> list[Path]:
+    from opengrader.core.pages.split import SIDECAR_SUFFIX
+
     input_path = Path(input_pdf)
     if not input_path.exists():
         raise FileNotFoundError(f"input PDF not found: {input_path}")
@@ -108,7 +111,13 @@ def split_scanned_submission_pdf(
             writer.write(f)
 
         write_scan_warnings(destination, page_range.warnings)
+        remove_note(destination, SIDECAR_SUFFIX)
         created_files.append(destination)
+
+    extra = read_extra_pages_map(output_path)
+    written = {pdf.stem for pdf in created_files}
+    if written & extra.keys():
+        write_extra_pages_map(output_path, {stem: pages for stem, pages in extra.items() if stem not in written})
 
     return created_files
 

@@ -858,6 +858,15 @@ def _save_inputs(
     ),
 )
 @click.option(
+    "--fixed",
+    "fixed_split",
+    is_flag=True,
+    help=(
+        "Split the scan every --pages-per-submission pages instead of matching "
+        "pages to find where each student starts."
+    ),
+)
+@click.option(
     "--jobs",
     type=int,
     help="Extraction worker processes (default: the extractor's own choice).",
@@ -1034,6 +1043,7 @@ def command(
     section_rosters: tuple[str, ...],
     blank_template: str | None,
     pages_per_submission: int | None,
+    fixed_split: bool,
     jobs: int | None,
     llm: bool | None,
     llm_vision_model: str,
@@ -1091,6 +1101,9 @@ def command(
         folder = str(target)
     _resolve_class_folder(folder, inputs, stream=sys.stderr if as_json else sys.stdout)
 
+    if fixed_split and not inputs.pages_per_submission:
+        raise click.UsageError("--fixed needs --pages-per-submission.")
+
     ai = resolved_ai()
     request = PipelineRequest(
         scan=Path(inputs.scan),
@@ -1101,6 +1114,7 @@ def command(
         section_scans=inputs.section_scans,
         blank_template=Path(inputs.blank_template) if inputs.blank_template else None,
         pages_per_submission=inputs.pages_per_submission,
+        fixed_split=fixed_split,
         reorder_pages=reorder_pages,
         keep_page_order=keep_page_order,
         fix_split=fix_split,

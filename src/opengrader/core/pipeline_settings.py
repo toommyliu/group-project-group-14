@@ -52,6 +52,7 @@ class FolderPipelineSettings:
     # `PDF[=SECTION]` lines, one scan per section, kept exactly as typed. Blank
     # (with the box ticked) means the ones the folder scan finds.
     section_scans: tuple[str, ...] = ()
+    fixed_split: bool = False
     reorder_pages: bool = False
     draft_rubrics: bool = False
 
@@ -74,6 +75,7 @@ _BOOL_FIELDS = (
     "use_region_map",
     "use_section_rosters",
     "use_section_scans",
+    "fixed_split",
     "reorder_pages",
     "draft_rubrics",
 )

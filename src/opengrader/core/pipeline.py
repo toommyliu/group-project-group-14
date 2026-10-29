@@ -126,6 +126,7 @@ class PipelineRequest:
     # two cannot be combined — the extractor refuses the pair.
     region_map: Path | None = None
     pages_per_submission: int | None = None
+    fixed_split: bool = False
     # Sort each submission's pages. Off by default: a scan's pages are left as
     # scanned and a submission that looks out of order is reported instead.
     reorder_pages: bool = False
@@ -556,6 +557,8 @@ def _split_argv(request: PipelineRequest) -> tuple[str, ...]:
     ]
     if request.pages_per_submission:
         argv += ["--pages-per-submission", str(request.pages_per_submission)]
+    if request.fixed_split:
+        argv.append("--fixed")
     if request.blank_template is not None:
         argv += ["--blank-template", str(request.blank_template)]
     if request.reorder_pages:
@@ -716,6 +719,8 @@ def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
         # Only when on, so ledgers written before the option existed still match.
         if request.reorder_pages:
             settings["reorder"] = True
+        if request.fixed_split:
+            settings["fixed"] = True
         if request.section:
             settings["filename_prefix"] = section_slug(request.section)
         return (input_fingerprint(request.scan), settings_fingerprint(settings))

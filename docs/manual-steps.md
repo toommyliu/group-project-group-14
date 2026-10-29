@@ -10,6 +10,8 @@ opengrader qa-file generate-template --qa-file qa.md --output-pdf template.pdf
 # 2. Check and split the scanned stack
 opengrader scan-check --input scans/all.pdf --pages-per-submission 6
 opengrader submission-splitter --input scans/all.pdf --output split/ --fix-rotation
+# or, if every submission has exactly 6 pages, cut every 6 pages without matching them:
+opengrader submission-splitter --input scans/all.pdf --output split/ --pages-per-submission 6 --fixed
 
 # 3. Read each student's answers (optional: add --llm-responses to transcribe handwriting with the AI in AI setup)
 opengrader submission-extractor --input split/ --output student-submissions/ --qa-file qa.md

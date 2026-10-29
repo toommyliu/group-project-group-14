@@ -612,6 +612,9 @@ class SetupScreen(OutlineButtons, Vertical):
                             "graded — without it, that check can't run at all.",
                             classes="card-hint",
                         )
+                        yield Checkbox(
+                            "Split strictly every that many pages", id="pipe-fixed-split"
+                        )
 
                         yield Checkbox(
                             "Match student names against a roster", id="pipe-use-roster"
@@ -2456,6 +2459,7 @@ class SetupScreen(OutlineButtons, Vertical):
                 f"{entry}\n" for entry in saved.section_scans
             )
         tick("pipe-many-scans", saved.use_section_scans)
+        tick("pipe-fixed-split", saved.fixed_split)
         tick("pipe-reorder", saved.reorder_pages)
         tick("pipe-draft-rubrics", saved.draft_rubrics)
 
@@ -2501,6 +2505,7 @@ class SetupScreen(OutlineButtons, Vertical):
             section_scans=tuple(
                 line.strip() for line in raw_scans.splitlines() if line.strip()
             ),
+            fixed_split=ticked("pipe-fixed-split"),
             reorder_pages=ticked("pipe-reorder"),
             draft_rubrics=ticked("pipe-draft-rubrics"),
         )
@@ -3781,6 +3786,13 @@ class SetupScreen(OutlineButtons, Vertical):
                 )
                 return None
             pages = int(pages_str)
+        fixed_split = self.query_one("#pipe-fixed-split", Checkbox).value
+        if fixed_split and pages is None:
+            self.app.notify(
+                "Fill in Pages per submission to split strictly by page count.",
+                severity="error",
+            )
+            return None
 
         current = self._ai()
         llm = LlmOptions(
@@ -3799,6 +3811,7 @@ class SetupScreen(OutlineButtons, Vertical):
             blank_template=template,
             region_map=region_map,
             pages_per_submission=pages,
+            fixed_split=fixed_split,
             reorder_pages=self.query_one("#pipe-reorder", Checkbox).value,
             llm=llm,
             jobs=jobs,

@@ -34,7 +34,8 @@ EPILOG = """\
 \b
 Examples:
   opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --start-page 3
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fixed
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fixed --start-page 3
   opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
   opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --blank-template templates/blank.pdf
   opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
@@ -411,19 +412,26 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
     "--pages-per-submission",
     type=int,
     help=("Pages per student submission. For scans this checks the split (a submission of "
-          "another length is flagged); pages are still matched to decide it. For typed PDFs, "
-          "or with --detect-boundaries, it is a fixed split size."),
+          "another length is flagged); pages are still matched to decide it unless --fixed "
+          "is given. For typed PDFs it is a fixed split size."),
+)
+@click.option(
+    "--fixed",
+    is_flag=True,
+    help=("Cut every --pages-per-submission pages, from --start-page to --end-page, even "
+          "for scans. Nothing is read or matched to decide where a student starts. Pages "
+          "are sorted only with --reorder or --fix-order."),
 )
 @click.option(
     "--start-page",
     type=int,
     default=1,
-    help="1-indexed start page for splitting (default: 1).",
+    help="1-indexed start page for splitting (default: 1). Used only for fixed-size splits (--fixed, or a typed PDF with --pages-per-submission).",
 )
 @click.option(
     "--end-page",
     type=int,
-    help="Optional 1-indexed end page for splitting.",
+    help="Optional 1-indexed end page for splitting. Used only for fixed-size splits (--fixed, or a typed PDF with --pages-per-submission).",
 )
 @click.option(
     "--filename-prefix",
@@ -454,7 +462,8 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
         "the page numbers read off the scan. For typed PDFs and "
         "--detect-boundaries it reorders every split PDF (text layer → QR → "
         "OCR → Ollama VLM) whether or not the pre-flight saw anything wrong; "
-        "see --fix-order for the version that only acts on evidence."
+        "see --fix-order for the version that only acts on evidence. --fixed "
+        "splits sort the same way."
     ),
 )
 @click.option(
@@ -486,7 +495,8 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
         "Submissions may contain extra student-work/scratch pages. Record "
         "which pages match no printed page so extraction skips them. For "
         "typed PDFs and --detect-boundaries this needs --blank-template (or "
-        "--reorder), and moves those pages to the end."
+        "--reorder), and moves those pages to the end. With --fixed it needs "
+        "--reorder."
     ),
 )
 @click.option(
@@ -548,7 +558,7 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
         "For scans, pages are matched to it to judge page order (and to sort "
         "by, with --reorder). For typed PDFs and --detect-boundaries it "
         "locates page numbers more accurately and implicitly enables "
-        "--reorder."
+        "--reorder (not with --fixed)."
     ),
 )
 @click.option(
@@ -587,6 +597,7 @@ def command(
     input_path: str,
     output: str,
     pages_per_submission: int | None,
+    fixed: bool,
     start_page: int,
     end_page: int | None,
     filename_prefix: str,
@@ -612,6 +623,13 @@ def command(
     """
     emit = status_callback or print
 
+    if fixed and not pages_per_submission:
+        raise click.UsageError("--fixed needs --pages-per-submission.")
+    if fixed and detect_boundaries:
+        raise click.UsageError("--fixed and --detect-boundaries can't be used together.")
+    if fixed and reorder_only:
+        raise click.UsageError("--reorder-only needs pages matched to each other; use --reorder with --fixed.")
+
     input_pdf = Path(input_path)
     if not input_pdf.exists():
         raise FileNotFoundError(f"input PDF not found: {input_pdf}")
@@ -626,7 +644,7 @@ def command(
 
     egress.activate(Path(output))
 
-    if not detect_boundaries and (pages_per_submission is None or _is_scan(input_pdf)):
+    if not detect_boundaries and not fixed and (pages_per_submission is None or _is_scan(input_pdf)):
         _split_by_page_catalog(
             input_pdf,
             emit,
@@ -670,7 +688,7 @@ def command(
     use_boundary = detect_boundaries or pages_per_submission is None
     # --extra-work-pages alone does not sort: with no template to say which pages are
     # extra, sorting only pushes pages whose number went unread to the end.
-    uses_ordering_pass = reorder or blank_template or auto_reorder
+    uses_ordering_pass = reorder or auto_reorder or (blank_template and not fixed)
     may_use_vlm = llm_page_numbers and (use_boundary or uses_ordering_pass)
 
     if may_use_vlm:
@@ -776,10 +794,8 @@ def command(
             )
     elif extra_work_pages:
         write_extra_pages_map(Path(output), {pdf_path.stem: () for pdf_path in created})
-        emit(
-            "No extra work pages recorded: telling them apart needs --blank-template "
-            "(or --reorder). Pages were left as scanned."
-        )
+        needs = "--reorder" if fixed else "--blank-template (or --reorder)"
+        emit(f"No extra work pages recorded: telling them apart needs {needs}. Pages were left as scanned.")
 
     from opengrader.core.pages.split_review import SplitPage, SplitPart, typical_submission
     from opengrader.core.submissions.extra_pages import read_extra_pages_for
