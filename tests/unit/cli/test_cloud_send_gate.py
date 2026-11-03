@@ -417,8 +417,8 @@ def test_splitter_sends_nothing_to_the_cloud_without_the_flag(
 ) -> None:
     """Unlike every other child CLI above, the splitter must NOT refuse here.
 
-    Every vision call the splitter makes (page-number footers, Name/ID
-    headers) is a whole-page read, and GuardedVisionReader always redirects
+    Every vision call the splitter makes (page-number footers, read to
+    sort pages) is a whole-page read, and GuardedVisionReader always redirects
     those to a local reader — never to the cloud host — so a splitter run
     sends nothing to the cloud and must not ask for confirmation, even with
     a consented cloud provider selected and no --yes-send-to-cloud.
@@ -448,12 +448,24 @@ def test_splitter_sends_nothing_to_the_cloud_without_the_flag(
         lambda *_a, **_k: (_ for _ in ()).throw(ConnectionError("no local Ollama for this test")),
     )
 
+    # AI Setup pointing at the consented cloud host, reading handwriting on:
+    # the splitter takes both from there (it has no AI flags of its own).
+    from dataclasses import replace as _replace
+
+    monkeypatch.setattr(
+        submission_splitter,
+        "resolved_ai",
+        lambda: _replace(app_config.with_overrides(host=_GATE_CLOUD_HOST), read_handwriting=True),
+    )
+    # Cut every page and sort: the one path where the splitter reads page
+    # numbers with a vision model.
     submission_splitter.run_cli(
         [
             "--input", str(bundle),
             "--output", str(tmp_path / "split"),
-            "--llm-page-numbers",
-            "--ollama-host", _GATE_CLOUD_HOST,
+            "--split", "every-n",
+            "--pages-per-submission", "1",
+            "--reorder",
         ]
     )
 

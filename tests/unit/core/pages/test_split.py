@@ -4,7 +4,7 @@ import numpy as np
 
 from opengrader.core.pages.catalog import PageCatalog, PageGroup, PageMatch, ScanPage
 from opengrader.core.pages.layout import PageLayout
-from opengrader.core.pages.split import plan_submissions, shared_order_note
+from opengrader.core.pages.split import plan_submissions, shared_order_note, unclear_starts
 
 
 def _catalog(sequence: list[str | None], *, pages: int = 3) -> PageCatalog:
@@ -150,7 +150,7 @@ def test_a_shuffled_student_next_to_one_missing_page_one_reads_as_two_students()
     assert any("Missing page(s) 1" in w for w in planned[1].warnings)
 
 
-def test_an_expected_page_count_checks_the_split_but_does_not_decide_it():
+def test_an_expected_page_count_never_overrules_the_page_numbers():
     planned = plan_submissions(_catalog(["1", "2", "3", "3", "1", "2", "3"]), expected_count=3)
 
     assert [[m.page.index for m in s.pages] for s in planned] == [[0, 1, 2], [3], [4, 5, 6]]
@@ -201,3 +201,109 @@ def test_printed_pages_are_matched_to_the_blank_template_by_their_print(tmp_path
     }
 
     assert template_positions(PageCatalog(groups=groups, matches=[]), template) == {"a": 3, "b": 1, "c": 2}
+
+
+def _unnumbered(catalog: PageCatalog, *groups: str) -> PageCatalog:
+    for group in groups:
+        catalog.groups[group].page_number = None
+    return catalog
+
+
+def test_a_scan_whose_page_numbers_are_read_shows_where_papers_start():
+    assert unclear_starts(_catalog(["1", "2", "3", "1", "2", "3"])) is None
+
+
+def test_blank_backs_never_make_a_scan_unclear():
+    # Double-sided scanning of one-sided sheets: half the pages are blank.
+    assert unclear_starts(_catalog(["1", None, "2", None, "3", None] * 2)) is None
+
+
+def test_a_scan_with_no_page_numbers_is_unclear():
+    catalog = _unnumbered(_catalog(["1", "2", "3"] * 3), "1", "2", "3")
+
+    assert "no page was read as the first page" in unclear_starts(catalog)
+
+
+def test_a_scan_with_few_page_numbers_is_unclear():
+    catalog = _unnumbered(_catalog(["1", "2", "3"] * 3), "2", "3")
+
+    assert "only 3 of 9 printed pages" in unclear_starts(catalog)
+
+
+def test_a_scan_matching_no_printed_page_is_unclear():
+    assert "no scanned page matched" in unclear_starts(_catalog([None, None, None]))
+
+
+def _lengths(catalog: PageCatalog, expected_count: int | None = None) -> list[int]:
+    return [len(s.pages) for s in plan_submissions(catalog, expected_count=expected_count)]
+
+
+def test_with_no_page_number_read_the_expected_length_cuts_the_scan():
+    catalog = _unnumbered(_catalog(["1", "2", "3"] * 5), "1", "2", "3")
+
+    assert _lengths(catalog, expected_count=3) == [3, 3, 3, 3, 3]
+
+
+def test_when_only_page_one_is_read_each_paper_starts_on_it():
+    # Unread pages used to start papers for free: [1], [_, _, 1], [_, _, 1, _], …
+    catalog = _unnumbered(_catalog(["1", "2", "3"] * 5), "2", "3")
+
+    assert [[m.page.index for m in s.pages] for s in plan_submissions(catalog)] == [
+        [i, i + 1, i + 2] for i in range(0, 15, 3)
+    ]
+
+
+def test_blank_backs_go_with_the_page_they_were_scanned_after():
+    catalog = _catalog(["1", None, "2", None, "3", None] * 3)
+
+    assert _lengths(catalog) == [6, 6, 6]
+    assert all(s.pages[0].group == "1" for s in plan_submissions(catalog))
+
+
+def test_a_scratch_sheet_stays_with_the_paper_it_was_handed_in_with():
+    catalog = _catalog(["1", "2", "3", None, "1", "2", "3", None, None, "1", "2", "3"])
+
+    assert _lengths(catalog) == [4, 5, 3]
+
+
+def test_an_unread_page_beyond_the_expected_length_starts_no_paper_of_its_own():
+    # Page 3's number went unread on the first paper: it is that paper's page,
+    # not a one-page paper with every page missing.
+    catalog = _catalog(["1", "2", "3", "1", "2", "3"])
+    catalog.matches[2] = PageMatch(ScanPage(Path("scan.pdf"), 2), "x", np.eye(3), 100)
+    catalog.groups["x"] = PageGroup(id="x", reference=ScanPage(Path("scan.pdf"), 2), reference_turns=0,
+                                    layout=PageLayout(), page_number=None)
+
+    assert _lengths(catalog, expected_count=3) == [3, 3]
+
+
+def _coded(catalog: PageCatalog, *codes) -> PageCatalog:
+    from opengrader.core.qr_codes import OpengraderCode
+
+    for match, (student, version, page) in zip(catalog.matches, codes):
+        match.code = OpengraderCode(student_id=student, version=version, page=page, total_pages=3)
+    return catalog
+
+
+def test_a_qr_page_number_overrules_a_misread_footer():
+    catalog = _catalog(["1", "2", "3"] * 2)
+    catalog.groups["2"].page_number = 8
+    _coded(catalog, *[(None, "A", n) for n in (1, 2, 3, 1, 2, 3)])
+
+    planned = plan_submissions(catalog)
+
+    assert [len(s.pages) for s in planned] == [3, 3]
+    assert not any(s.order_breaks for s in planned)
+
+
+def test_qr_codes_naming_two_students_are_never_one_paper():
+    # Page numbers alone read this as one paper: Ada's pages 1-2, Ben's page 3.
+    catalog = _coded(_catalog(["1", "2", "3"]), ("ada", "A", 1), ("ada", "A", 2), ("ben", "A", 3))
+
+    assert [[m.page.index for m in s.pages] for s in plan_submissions(catalog)] == [[0, 1], [2]]
+
+
+def test_qr_codes_naming_two_versions_are_never_one_paper():
+    catalog = _coded(_catalog(["1", "2", "3"]), (None, "A", 1), (None, "A", 2), (None, "B", 3))
+
+    assert [[m.page.index for m in s.pages] for s in plan_submissions(catalog)] == [[0, 1], [2]]

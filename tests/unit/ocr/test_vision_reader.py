@@ -55,13 +55,6 @@ _DELEGATION_CASES = [
         3,
         id="extract_page_number",
     ),
-    pytest.param(
-        "page_has_identity_field",
-        "page_has_identity_field",
-        {},
-        True,
-        id="page_has_identity_field",
-    ),
 ]
 
 

@@ -53,7 +53,7 @@ class PlannedSubmission:
     order_warning: str = ""
 
     def page_numbers(self, catalog: PageCatalog) -> list[int | None]:
-        return [catalog.groups[m.group].page_number if m.group else None for m in self.pages]
+        return [number_of(catalog, m) for m in self.pages]
 
 
 def plan_submissions(
@@ -62,7 +62,7 @@ def plan_submissions(
 ) -> list[PlannedSubmission]:
     # Pages stay in scan order unless reorder is set: extraction finds each page by its print,
     # so a misread number moving a correct page costs more than a shuffled one left alone.
-    runs = _segments(catalog)
+    runs = _segments(catalog, expected_count)
     expected = catalog.expected_pages
     keyed = [_order_keys(catalog, run, template_positions) for run in runs]
     breaks = [_order_breaks([key for key in keys if key is not None]) for keys, _ in keyed]
@@ -156,7 +156,11 @@ def template_positions(catalog: PageCatalog, template: Path, *, dpi: int = 150) 
 def _order_keys(
     catalog: PageCatalog, run: list[PageMatch], positions: Mapping[str, int] | None
 ) -> tuple[list[int | None], bool]:
-    return order_keys(catalog, [m.group for m in run], positions)
+    keys, by_template = order_keys(catalog, [m.group for m in run], positions)
+    if by_template:
+        return keys, True
+    # Each page's own number: its QR code's where it carries one.
+    return [number_of(catalog, m) if m.group else None for m in run], False
 
 
 def order_keys(
@@ -210,26 +214,90 @@ def order_warning(
             "they can be sorted before extraction (--reorder when splitting).")
 
 
+def unclear_starts(catalog: PageCatalog) -> str | None:
+    """Why this scan can't show where each paper starts, or None when it can.
+
+    The cuts are chosen from the page numbers read off the printed pages. With
+    too few of them every way of cutting costs the same, and the planner then
+    takes the longest pieces it allows — two students in one PDF. A guess like
+    that is worse than asking for the page count, so the caller falls back to
+    cutting every N pages, or stops. Only pages that matched a printed page
+    are counted: blank backs and scratch sheets never make a scan unclear.
+    """
+    printed = [m for m in catalog.matches if m.group is not None]
+    if not printed:
+        return "no scanned page matched a printed page"
+    if 1 not in catalog.expected_pages:
+        return "no page was read as the first page of a paper"
+    numbered = sum(1 for m in printed if number_of(catalog, m) is not None)
+    if numbered * 2 < len(printed):
+        return f"a page number was read on only {numbered} of {len(printed)} printed pages"
+    return None
+
+
 def number_of(catalog: PageCatalog, match: PageMatch) -> int | None:
+    """The page's printed number: its own QR code's, which is exact, else its
+    printed page's (read off the footer, or inferred from its neighbours)."""
+    if match.code is not None and match.code.page is not None:
+        return match.code.page
     return catalog.groups[match.group].page_number if match.group else None
 
 
 def _expected_for(catalog: PageCatalog, run: list[PageMatch], expected: list[int]) -> list[int]:
-    counts = [catalog.groups[m.group].layout.page_count for m in run if m.group and catalog.groups[m.group].layout.page_count]
+    counts = [m.code.total_pages for m in run if m.code is not None and m.code.total_pages]
+    counts += [catalog.groups[m.group].layout.page_count for m in run if m.group and catalog.groups[m.group].layout.page_count]
     if counts:
         return list(range(1, max(counts) + 1))
     return expected
 
 
-def _segments(catalog: PageCatalog) -> list[list[PageMatch]]:
+# What it costs to put a page before a paper's first numbered page. A paper
+# starts on a numbered page; a page with no number read in front of it is
+# more likely the end of the paper scanned before (a blank back, a scratch
+# sheet, a last page whose number went unread), so it goes there unless its
+# own paper needs it. A printed page costs more than a blank or unmatched one:
+# it may be another student's page.
+_LEADING_PRINTED = 0.5
+_LEADING_UNMATCHED = 0.1
+# A run with no page number read and no length to measure it by: nothing says
+# where it starts or ends, so it is kept as rare as before.
+_UNANCHORED = 5.0
+
+
+@dataclass(frozen=True)
+class _CutPage:
+    # Matched a printed page (blank backs and scratch sheets did not).
+    printed: bool
+    number: int | None
+    # From the page's QR code: two students, or two versions, are never one paper.
+    student: str | None = None
+    version: str | None = None
+
+
+def _segments(catalog: PageCatalog, expected_count: int | None = None) -> list[list[PageMatch]]:
+    """Cut the scan into papers at the lowest total `_submission_cost`.
+
+    The length of a paper is what its QR codes print, else `expected_count`
+    when given (by a person, or a blank template's length), else the highest
+    page number printed.
+    """
     matches = catalog.matches
     expected = catalog.expected_pages
-    longest = 2 * max(1, len(expected)) + 2
+    length = catalog.qr_total_pages or expected_count or (max(expected) if expected else None)
+    longest = 2 * max(1, len(expected), length or 0) + 2
+    pages = [
+        _CutPage(
+            m.group is not None, number_of(catalog, m),
+            m.code.student_id if m.code is not None else None,
+            m.code.version if m.code is not None else None,
+        )
+        for m in matches
+    ]
     best = [0.0] + [float("inf")] * len(matches)
     cut = [0] * (len(matches) + 1)
     for end in range(1, len(matches) + 1):
         for start in range(max(0, end - longest), end):
-            cost = _submission_cost([number_of(catalog, m) for m in matches[start:end]], expected)
+            cost = _submission_cost(pages[start:end], expected, length)
             if best[start] + cost < best[end]:
                 best[end], cut[end] = best[start] + cost, start
     runs, end = [], len(matches)
@@ -239,15 +307,38 @@ def _segments(catalog: PageCatalog) -> list[list[PageMatch]]:
     return runs[::-1]
 
 
-def _submission_cost(numbers: list[int | None], expected: list[int]) -> float:
-    known = [n for n in numbers if n is not None]
+def _submission_cost(pages: Sequence[_CutPage], expected: Sequence[int], length: int | None) -> float:
+    """What it costs to call these scanned pages one paper.
+
+    Every paper costs 1, so pages that fit together stay together. A page
+    number read twice can't be one paper, nor can QR codes naming two
+    students or two versions. Each expected page missing costs 1,
+    but a printed page whose number went unread may be the missing one. Pages
+    beyond the paper's length cost 1 each — the printed pages only, so blank
+    backs and scratch sheets never make a paper too long — and pages in the
+    wrong order 0.25 a pair. Pages before the first numbered one cost
+    `_LEADING_*`, so a paper starts on a numbered page when it can.
+    """
+    known = [page.number for page in pages if page.number is not None]
     if len(known) != len(set(known)):
         return float("inf")
+    if len({p.student for p in pages if p.student}) > 1 or len({p.version for p in pages if p.version}) > 1:
+        return float("inf")
+    unread = sum(1 for page in pages if page.printed and page.number is None)
+    leading = 0.0
+    for page in pages:
+        if page.number is not None:
+            break
+        leading += _LEADING_PRINTED if page.printed else _LEADING_UNMATCHED
+    excess = max(0, len(known) + unread - length) if length else 0
     if not known:
-        return 5.0
-    missing = len([n for n in expected if n not in known])
+        if length is None:
+            return _UNANCHORED
+        # Nothing read says where this paper starts; only its length can.
+        return 1.0 + abs(unread - length) + leading
+    missing = max(0, len([n for n in expected if n not in known]) - unread)
     inversions = sum(1 for i, a in enumerate(known) for b in known[i + 1:] if a > b)
-    return 1.0 + missing + 0.25 * inversions
+    return 1.0 + missing + excess + 0.25 * inversions + leading
 
 
 def write_sidecar(pdf_path: Path, submission: PlannedSubmission, catalog: PageCatalog) -> Path:

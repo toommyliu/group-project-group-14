@@ -13,7 +13,6 @@ from opengrader.core.ocr.ollama_vlm import (
     extract_handwriting_only,
     extract_question_prompt_and_answer,
     extract_title_metadata,
-    page_has_identity_field,
 )
 
 
@@ -124,18 +123,6 @@ def test_handwriting_only_prompt_excludes_printed_remnants(monkeypatch, image_pa
     assert body["think"] is False
 
 
-def test_page_has_identity_field_sends_boolean_schema(monkeypatch, image_path):
-    captured = _capture_request_body(monkeypatch, '{"first_page": true}')
-    assert page_has_identity_field(image_path=image_path, config=OllamaVisionConfig()) is True
-    body = captured["body"]
-    assert body["format"] == {
-        "type": "object",
-        "properties": {"first_page": {"type": "boolean"}},
-        "required": ["first_page"],
-    }
-    assert body["options"]["num_predict"] == 128
-
-
 def test_generate_with_image_sends_keep_alive(monkeypatch, image_path):
     captured = _capture_request_body(monkeypatch, '{"value": ""}')
     extract_field_text(image_path=image_path, field_kind="sid", config=OllamaVisionConfig())
@@ -194,10 +181,9 @@ def test_page_number_prompt_asks_for_empty_string_not_null(monkeypatch):
         lambda path, config: extract_field_text(image_path=path, field_kind="name", config=config),
         lambda path, config: extract_field_text(image_path=path, field_kind="sid", config=config),
         lambda path, config: extract_title_metadata(image_path=path, config=config),
-        lambda path, config: page_has_identity_field(image_path=path, config=config),
         lambda path, config: ollama_vlm.extract_page_number(image_path=path, config=config),
     ],
-    ids=["name", "sid", "title", "identity-page", "page-number"],
+    ids=["name", "sid", "title", "page-number"],
 )
 def test_a_direct_identity_read_never_goes_to_a_remote_host(monkeypatch, image_path, call):
     """These helpers are unguarded functions; called directly with the Ollama

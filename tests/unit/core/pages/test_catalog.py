@@ -219,3 +219,113 @@ def test_only_scans_that_print_no_points_need_an_answer_key(tmp_path):
     assert scans_need_answer_key(printed) is False
     # No catalog to tell from: never a reason to hold a run up.
     assert scans_need_answer_key(never_split) is False
+
+
+# --- QR codes ---------------------------------------------------------------
+
+_QR_QUESTIONS = [
+    {"id": f"q{i}", "points": 5, "prompt": f"Question {i}? " + ("Explain your reasoning in full. " * 12)}
+    for i in range(1, 21)
+]
+
+
+def _page_image(pdf: Path, index: int = 0):
+    import fitz
+
+    from opengrader.core.pdf_utils import render_page_to_image
+
+    with fitz.open(str(pdf)) as doc:
+        image, _, _ = render_page_to_image(doc, index, dpi=150, cache=False)
+    return image
+
+
+def test_a_template_qr_code_is_read_however_the_sheet_was_fed_in(tmp_path: Path) -> None:
+    from opengrader.core.pages.catalog import corner_code
+    from opengrader.core.pdf.templates import generate_template_pdf
+
+    pdf = tmp_path / "quiz.pdf"
+    generate_template_pdf(pdf, "B", _QR_QUESTIONS[:2], "Quiz", qr=True)
+    image = _page_image(pdf)
+
+    for angle in (0, 90, 180, 270):
+        code = corner_code(image.rotate(angle, expand=True))
+        assert code is not None and (code.page, code.version) == (1, "B"), angle
+
+
+def test_a_page_without_a_qr_code_reads_as_none(tmp_path: Path) -> None:
+    from opengrader.core.pages.catalog import corner_code
+    from opengrader.core.pdf.templates import generate_template_pdf
+
+    pdf = tmp_path / "plain.pdf"
+    generate_template_pdf(pdf, "A", _QR_QUESTIONS[:2], "Quiz")
+
+    assert corner_code(_page_image(pdf)) is None
+
+
+def test_a_scan_without_qr_codes_stops_being_searched(monkeypatch) -> None:
+    from opengrader.core.pages import catalog as catalog_module
+    from opengrader.core.qr_codes import OpengraderCode
+
+    calls: list[int] = []
+    monkeypatch.setattr(catalog_module, "corner_code", lambda _image: calls.append(1))
+    probe = catalog_module._QrProbe()
+    for _ in range(20):
+        probe.read(None)
+    assert len(calls) == catalog_module._QR_GIVE_UP
+
+    # One code found: the scan carries them, and every page is read.
+    calls.clear()
+    monkeypatch.setattr(catalog_module, "corner_code", lambda _image: calls.append(1) or OpengraderCode(page=1))
+    probe = catalog_module._QrProbe()
+    for _ in range(20):
+        probe.read(None)
+    assert len(calls) == 20
+
+
+def test_a_pages_qr_code_survives_saving_the_catalog(tmp_path: Path) -> None:
+    from opengrader.core.pages.catalog import PageCatalog, PageMatch, ScanPage, load_catalog, save_catalog
+    from opengrader.core.qr_codes import OpengraderCode
+
+    code = OpengraderCode(student_id="100001", version="A", page=2, total_pages=4)
+    catalog = PageCatalog(groups={}, matches=[
+        PageMatch(ScanPage(tmp_path / "scan.pdf", 0), None, None, code=code),
+        PageMatch(ScanPage(tmp_path / "scan.pdf", 1), None, None),
+    ])
+    save_catalog(catalog, tmp_path / "pages")
+
+    loaded = load_catalog(tmp_path / "pages")
+    assert [m.code for m in loaded.matches] == [code, None]
+    assert loaded.qr_total_pages == 4
+
+
+def test_personalized_qr_codes_keep_two_students_apart_where_page_numbers_cannot(tmp_path: Path) -> None:
+    import fitz
+    import pytest
+
+    pytest.importorskip("rapidocr")
+    from opengrader.core.pages.catalog import build_catalog, scan_pages
+    from opengrader.core.pages.split import plan_submissions
+    from opengrader.core.pdf.templates import generate_personalized_batch
+    from opengrader.core.roster import RosterStudent
+
+    batch = tmp_path / "batch.pdf"
+    students = [RosterStudent(student_id=f"10000{i}", name=name) for i, name in enumerate(["Ada Li", "Ben Ruiz", "Cy Park"], 1)]
+    generate_personalized_batch(batch, students, "A", _QR_QUESTIONS, "Quiz", include_master_key=False)
+    with fitz.open(str(batch)) as doc:
+        length = len(doc) // len(students)
+        assert length >= 4, "each paper needs several pages"
+        # Ada lost her last pages and Ben his first: by page number alone,
+        # Ada's 1-2 and Ben's 3..n read as one complete paper.
+        keep = [i for i in range(len(doc)) if not (2 <= i < length or length <= i < length + 2)]
+        scan = fitz.open()
+        for i in keep:
+            scan.insert_pdf(doc, from_page=i, to_page=i)
+        scan.save(str(tmp_path / "scan.pdf"))
+        scan.close()
+
+    catalog = build_catalog(scan_pages([tmp_path / "scan.pdf"]), None, workers=2)
+    planned = plan_submissions(catalog)
+
+    owners = [{m.code.student_id for m in s.pages} for s in planned]
+    assert owners == [{"100001"}, {"100002"}, {"100003"}]
+    assert [len(s.pages) for s in planned] == [2, length - 2, length]

@@ -57,10 +57,6 @@ class FakeReader:
         self.calls.append("page_number")
         return 1
 
-    def page_has_identity_field(self, *, image_path):
-        self.calls.append("identity_page")
-        return True
-
 
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
@@ -900,7 +896,7 @@ def test_the_guarded_reader_survives_the_process_boundary(cloud) -> None:
     restored = pickle.loads(pickle.dumps(remote))
     assert restored == remote
     with pytest.raises(IdentityFieldBlocked):
-        restored.page_has_identity_field(image_path="page.png")
+        restored.extract_page_number(image_path="page.png")
 
 
 def test_the_approval_text_shows_control_characters_in_a_command_as_escapes(tmp_path) -> None:

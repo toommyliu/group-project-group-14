@@ -14,7 +14,7 @@ def extracted(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
 
     root = tmp_path_factory.mktemp("cmpe142")
     split, out = root / "split", root / "out"
-    submission_splitter.run_cli(["--input", str(SCAN), "--output", str(split), "--fix-rotation", "--fix-order"],
+    submission_splitter.run_cli(["--input", str(SCAN), "--output", str(split)],
                                 status_callback=lambda _m: None)
     submission_extractor.run_cli(["--input", str(split), "--output", str(out), "--jobs", "1",
                                   "--ollama-host", "http://127.0.0.1:9"])

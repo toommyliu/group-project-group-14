@@ -1226,3 +1226,115 @@ def test_without_a_terminal_the_ai_pause_says_how_to_answer(tmp_path, monkeypatc
     assert "Paused before auto-grading" in out
     assert "--grade-without-ai" in out and "--no-auto-grade" in out
     assert "ai-unavailable:" not in out
+
+
+def _pdf(path: Path, pages: int) -> Path:
+    import fitz
+
+    doc = fitz.open()
+    for _ in range(pages):
+        doc.new_page()
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def _templated_folder(tmp_path: Path, scan_pages: int) -> Path:
+    folder = tmp_path / "quiz"
+    folder.mkdir()
+    _pdf(folder / "scans.pdf", scan_pages)
+    _pdf(folder / "blank-template.pdf", 3)
+    (folder / "qa.md").write_text(_QA_TEXT, encoding="utf-8")
+    return folder
+
+
+def _terminal(monkeypatch, answers: list[str]) -> list[str]:
+    asked: list[str] = []
+
+    def answer(prompt: str = "") -> str:
+        asked.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", answer)
+    return asked
+
+
+def test_a_template_folder_is_asked_once_whether_to_cut_every_n_pages(
+    tmp_path, captured, monkeypatch, capsys
+) -> None:
+    from opengrader.core.pipeline_settings import load_split_choice
+
+    folder = _templated_folder(tmp_path, 12)
+    asked = _terminal(monkeypatch, ["y"])
+
+    run_command(run_module.command, [str(folder)])
+
+    assert captured["request"].fixed_split is True
+    assert captured["request"].pages_per_submission is None
+    assert asked == ["Cut the scan every 3 pages? [Y/n] "]
+    out = capsys.readouterr().out
+    assert "scans.pdf: 12 pages = 4 papers of 3" in out
+    assert "length of the blank template" in out
+    assert load_split_choice(folder) is True
+
+    # Remembered: the next run, even one nobody can answer, cuts the same way.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    run_command(run_module.command, [str(folder)])
+    assert captured["request"].fixed_split is True
+
+
+def test_no_finds_where_each_paper_starts_and_is_remembered(tmp_path, captured, monkeypatch) -> None:
+    from opengrader.core.pipeline_settings import load_split_choice
+
+    folder = _templated_folder(tmp_path, 12)
+    _terminal(monkeypatch, ["n"])
+
+    run_command(run_module.command, [str(folder)])
+
+    assert captured["request"].fixed_split is False
+    assert load_split_choice(folder) is False
+
+
+def test_a_scan_that_does_not_divide_evenly_is_not_offered_fixed_cuts(
+    tmp_path, captured, monkeypatch, capsys
+) -> None:
+    from opengrader.core.pipeline_settings import load_split_choice
+
+    folder = _templated_folder(tmp_path, 13)
+    asked = _terminal(monkeypatch, [])
+
+    run_command(run_module.command, [str(folder)])
+
+    assert asked == []
+    assert captured["request"].fixed_split is False
+    assert "4 papers of 3 and 1 left over" in capsys.readouterr().out
+    assert load_split_choice(folder) is None
+
+
+def test_a_run_nobody_can_answer_is_not_asked(tmp_path, captured, monkeypatch) -> None:
+    from opengrader.core.pipeline_settings import load_split_choice
+
+    folder = _templated_folder(tmp_path, 12)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    run_command(run_module.command, [str(folder)])
+
+    assert captured["request"].fixed_split is False
+    assert load_split_choice(folder) is None
+
+
+def test_split_flag_answers_up_front(tmp_path, captured, monkeypatch) -> None:
+    folder = _templated_folder(tmp_path, 12)
+    asked = _terminal(monkeypatch, [])
+
+    run_command(run_module.command, [str(folder), "--split", "every-n"])
+
+    assert asked == []
+    assert captured["request"].fixed_split is True
+
+
+def test_the_fixed_flag_is_gone_in_favour_of_split_every_n(tmp_path, captured) -> None:
+    folder = _templated_folder(tmp_path, 12)
+
+    assert _exit_status([str(folder), "--fixed"]) == 2

@@ -9,11 +9,10 @@ import sys
 
 import click
 
-from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
+from opengrader.cli import CONTEXT_SETTINGS, resolved_ai, run_command
 from opengrader.core.submissions import (
     reorder_pdf_pages,
     page_order_fix_is_safe,
-    plan_boundary_ranges,
     plan_submission_ranges,
     _load_page_number_layout,
     analyze_scan_pdf,
@@ -33,18 +32,23 @@ from pypdf import PdfReader
 EPILOG = """\
 \b
 Examples:
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/   # find where each paper starts
   opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fixed
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fixed --start-page 3
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --blank-template templates/blank.pdf
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
   opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --blank-template templates/blank.pdf --extra-work-pages
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/   # no page count → match pages to each other, flag missing pages
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --detect-boundaries --dry-run
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation
-  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation --fix-order
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --split every-n --pages-per-submission 6
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --split every-n --blank-template templates/blank.pdf
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --split every-n --pages-per-submission 6 --start-page 3
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --reorder
+  opengrader submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --dry-run
 """
+
+
+_NO_STARTS_FOUND = (
+    "Can't tell where each student's paper starts: {reason}. Give the number of pages "
+    "in each paper and the scan is cut every that many pages (in the app: choose "
+    "'Every N pages' and fill in Pages per submission; on the command line: "
+    "--pages-per-submission N)."
+)
 
 
 def _verified_vision_reader(
@@ -57,13 +61,13 @@ def _verified_vision_reader(
         print(f"Error: {exc}", file=sys.stderr)
         print(
             f"Fix: run 'opengrader providers consent {resolved.provider.name}' "
-            "(or open AI Setup), then retry — or pass --no-llm-page-numbers to "
-            "skip this fallback tier.",
+            "(or open AI Setup), then retry — or turn off reading handwriting in "
+            "AI Setup to skip this fallback tier.",
             file=sys.stderr,
         )
         sys.exit(2)
     except Exception as exc:
-        emit(f"Ollama vision fallback unavailable ({exc}); using Tesseract only.")
+        emit(f"Vision fallback unavailable ({exc}); using Tesseract only.")
         return None
     return reader
 
@@ -92,13 +96,13 @@ def _run_scan_preflight(
     *,
     output: str,
     expected_pages: int | None,
-    check_orientation: bool,
-    check_page_order: bool,
-    fix_rotation: bool,
-    fix_order: bool,
     has_blank_template: bool,
     dry_run: bool,
 ) -> _PreflightOutcome:
+    """Check a scan about to be cut every N pages, turn its pages upright and
+    say whether its page order can be put right after the cut. Nothing reads
+    where a paper starts on that path, so a page fed in upside down or out of
+    order is only caught here. Page matching turns and orders pages itself."""
     emit(
         "Checking the scan (rotation, page order, blanks, resolution, margins, "
         "page count)…"
@@ -106,8 +110,6 @@ def _run_scan_preflight(
     report = analyze_scan_pdf(
         input_pdf,
         pages_per_submission=expected_pages,
-        check_orientation=check_orientation,
-        check_page_order=check_page_order,
         progress_callback=emit,
     )
 
@@ -140,16 +142,9 @@ def _run_scan_preflight(
     else:
         emit("  ✓ Scan looks clean.")
 
-    auto_reorder = _resolve_auto_reorder(
-        report, emit, fix_order=fix_order, has_blank_template=has_blank_template
-    )
+    auto_reorder = _resolve_auto_reorder(report, emit, has_blank_template=has_blank_template)
 
-    if not fix_rotation or not report.rotation_plan:
-        if report.rotation_plan and not fix_rotation:
-            emit(
-                "  Re-run with --fix-rotation to turn these pages upright before "
-                "splitting."
-            )
+    if not report.rotation_plan:
         return _PreflightOutcome(input_pdf, auto_reorder)
 
     if dry_run:
@@ -166,23 +161,17 @@ def _run_scan_preflight(
 
 
 def _resolve_auto_reorder(
-    report, emit: Callable[[str], None], *, fix_order: bool, has_blank_template: bool
+    report, emit: Callable[[str], None], *, has_blank_template: bool
 ) -> bool:
+    """Whether to put out-of-order pages back in order after the cut: only
+    where the page numbers can be trusted (QR codes, a text layer, or a blank
+    template supplying the sequence). An OCR'd number may be misread, and
+    moving a page that was right is worse than leaving one shuffled."""
     order_plan = report.page_order_plan
     if not order_plan:
         return False
 
     safe = page_order_fix_is_safe(order_plan, has_blank_template=has_blank_template)
-    if not fix_order:
-        emit(
-            "  Re-run with --fix-order to put these pages back in order after "
-            "splitting."
-            if safe
-            else "  Check these pages by eye, then re-run with --reorder to sort "
-            "them after splitting."
-        )
-        return False
-
     if safe:
         basis = (
             "a blank template supplies the page sequence"
@@ -234,7 +223,10 @@ def _split_by_page_catalog(
     reorder_only: tuple[str, ...],
     blank_template: Path | None,
     interactive: bool,
-) -> None:
+) -> bool:
+    """Split by matching pages. False when the scan can't show where each
+    paper starts and a page count was given: the caller then cuts every
+    `pages_per_submission` pages instead. With no page count it stops."""
     import os
 
     from opengrader.core.pages.catalog import CATALOG_DIRNAME, build_catalog, scan_pages
@@ -243,6 +235,7 @@ def _split_by_page_catalog(
         plan_submissions,
         shared_order_note,
         template_positions,
+        unclear_starts,
         write_sidecar,
         write_split_pdf,
     )
@@ -256,6 +249,18 @@ def _split_by_page_catalog(
         workers=min(8, os.cpu_count() or 4),
         emit=emit,
     )
+    unclear = unclear_starts(catalog)
+    if unclear:
+        if not pages_per_submission:
+            sys.exit(_NO_STARTS_FOUND.format(reason=unclear))
+        note = (f"Can't tell where each paper starts ({unclear}), so the scan is cut "
+                f"every {pages_per_submission} pages instead.")
+        emit(note)
+        print(f"Warning: {note}", file=sys.stderr)
+        if reorder_only:
+            print("Warning: --reorder-only needs pages matched to each other; nothing is "
+                  "sorted by it on a scan cut every N pages.", file=sys.stderr)
+        return False
     positions = None
     if blank_template is not None:
         emit("Matching the printed pages to the blank template…")
@@ -270,7 +275,7 @@ def _split_by_page_catalog(
     expected = catalog.expected_pages
     if pages_per_submission and expected and len(expected) != pages_per_submission:
         print(f"Warning: the scan shows {len(expected)} printed page(s) per submission, but "
-              f"--pages-per-submission is {pages_per_submission}; check the page count.", file=sys.stderr)
+              f"{pages_per_submission} are expected; check the page count.", file=sys.stderr)
     emit(f"Input: {input_pdf} ({len(catalog.matches)} pages, {len(expected)} printed page(s) per submission)")
     emit(f"Planned student splits: {len(planned)}")
     for submission in planned:
@@ -281,7 +286,7 @@ def _split_by_page_catalog(
     _report_scan_order(planned, emit, shared_note=shared_order_note(planned))
     if dry_run:
         emit("Dry run complete. No files written.")
-        return
+        return True
 
     output.mkdir(parents=True, exist_ok=True)
     extra_pages: dict[str, tuple[int, ...]] = {}
@@ -305,8 +310,9 @@ def _split_by_page_catalog(
     if not _review_split(
         output, parts, pages_per_submission or usual_length, usual_pages, emit, interactive=interactive
     ):
-        return
+        return True
     _review_scan_order(planned, positions, emit, output=output, reorder_only=reorder_only, interactive=interactive)
+    return True
 
 
 def _review_split(
@@ -409,29 +415,37 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
     help="Directory where split PDF files will be written.",
 )
 @click.option(
-    "--pages-per-submission",
-    type=int,
-    help=("Pages per student submission. For scans this checks the split (a submission of "
-          "another length is flagged); pages are still matched to decide it unless --fixed "
-          "is given. For typed PDFs it is a fixed split size."),
+    "--split",
+    "split_method",
+    type=click.Choice(["every-n", "find-starts"]),
+    help=(
+        "How to cut the PDF into submissions. every-n: every --pages-per-submission "
+        "pages (or the blank template's length), from --start-page to --end-page; "
+        "nothing is read to decide where a student starts, and the scan is checked, "
+        "turned upright and, where the page numbers can be trusted, put back in "
+        "order. find-starts: match pages to each other and start a paper at each "
+        "page 1; papers may differ in length. Default: find-starts for a scan, "
+        "every-n for a typed PDF given a page count."
+    ),
 )
 @click.option(
-    "--fixed",
-    is_flag=True,
-    help=("Cut every --pages-per-submission pages, from --start-page to --end-page, even "
-          "for scans. Nothing is read or matched to decide where a student starts. Pages "
-          "are sorted only with --reorder or --fix-order."),
+    "--pages-per-submission",
+    type=int,
+    help=("Pages per student submission. With --split every-n, where the PDF is cut. "
+          "With find-starts it checks the split (a submission of another length is "
+          "flagged), and is where the scan is cut if too few page numbers can be read "
+          "to tell where each paper starts. Blank: the blank template's length."),
 )
 @click.option(
     "--start-page",
     type=int,
     default=1,
-    help="1-indexed start page for splitting (default: 1). Used only for fixed-size splits (--fixed, or a typed PDF with --pages-per-submission).",
+    help="1-indexed start page for splitting (default: 1). Used only by --split every-n.",
 )
 @click.option(
     "--end-page",
     type=int,
-    help="Optional 1-indexed end page for splitting. Used only for fixed-size splits (--fixed, or a typed PDF with --pages-per-submission).",
+    help="Optional 1-indexed end page for splitting. Used only by --split every-n.",
 )
 @click.option(
     "--filename-prefix",
@@ -453,17 +467,13 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
     "--reorder",
     is_flag=True,
     help=(
-        "Sort each submission's pages without asking. Without it a scan's "
-        "pages are never moved unprompted: a submission that looks out of "
-        "order is reported and left as scanned, because a misread page number "
-        "would move a page that was already right, and in a terminal you are "
-        "then asked which to sort. For scans the order comes from --blank-template when "
-        "one is given (pages are matched to it by their print), otherwise from "
-        "the page numbers read off the scan. For typed PDFs and "
-        "--detect-boundaries it reorders every split PDF (text layer → QR → "
-        "OCR → Ollama VLM) whether or not the pre-flight saw anything wrong; "
-        "see --fix-order for the version that only acts on evidence. --fixed "
-        "splits sort the same way."
+        "Sort each submission's pages without asking. Without it pages are "
+        "moved only on trustworthy evidence: never, when pages were matched "
+        "to each other (a submission that looks out of order is reported, and "
+        "in a terminal you are asked which to sort), and with every-n only "
+        "where the numbers came from QR codes, a text layer or a blank "
+        "template. The order comes from --blank-template when one is given, "
+        "otherwise from the page numbers read off the pages."
     ),
 )
 @click.option(
@@ -473,19 +483,8 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
     help=(
         "Sort only these submissions of a scan (e.g. submission-0007), and "
         "only if they look out of order. Every other submission is left as "
-        "scanned. Repeat the flag or separate names with commas."
-    ),
-)
-@click.option(
-    "--detect-boundaries",
-    is_flag=True,
-    help=(
-        "Legacy boundary detection from printed page numbers and Name/ID headers read "
-        "with Tesseract. Without --pages-per-submission (and without this flag), pages "
-        "are instead matched to each other: each student starts at a copy of page 1, "
-        "pages are turned upright and put in order, and missing pages are flagged. "
-        "With this flag, the page count or blank template checks completeness instead "
-        "of fixing split sizes."
+        "scanned. Repeat the flag or separate names with commas. Needs pages "
+        "matched to each other (find-starts)."
     ),
 )
 @click.option(
@@ -493,101 +492,21 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
     is_flag=True,
     help=(
         "Submissions may contain extra student-work/scratch pages. Record "
-        "which pages match no printed page so extraction skips them. For "
-        "typed PDFs and --detect-boundaries this needs --blank-template (or "
-        "--reorder), and moves those pages to the end. With --fixed it needs "
-        "--reorder."
-    ),
-)
-@click.option(
-    "--scan-check",
-    is_flag=True,
-    help=(
-        "Pre-flight the scan before splitting: report rotated pages, sheets "
-        "that are out of order, blank sheets, low resolution, clipped margins "
-        "and a page count that isn't a whole number of submissions. Report "
-        "only — see --fix-rotation and --fix-order."
-    ),
-)
-@click.option(
-    "--fix-rotation",
-    is_flag=True,
-    help=(
-        "Turn upside-down/sideways pages upright before splitting, so every "
-        "later stage sees a readable page. Implies --scan-check. Writes a "
-        "corrected copy under <output>/.opengrader/; the input scan is never "
-        "modified."
-    ),
-)
-@click.option(
-    "--fix-order",
-    is_flag=True,
-    help=(
-        "Put out-of-order pages back in order after splitting, but only where "
-        "the pre-flight found a problem AND the page numbers can be trusted "
-        "— that is, they came from QR codes or a PDF text layer, or a "
-        "--blank-template is supplying the true page sequence. When the "
-        "numbers were merely OCR'd off a scan, the finding is reported and "
-        "nothing is moved, because a misread number would shift a page that "
-        "was in the right place. Implies --scan-check; use --reorder to "
-        "reorder regardless of evidence. Scans split by matching their pages "
-        "skip this pre-flight and are sorted only by --reorder."
-    ),
-)
-@click.option(
-    "--no-scan-orientation",
-    is_flag=True,
-    help=(
-        "Skip the rotation part of --scan-check (one Tesseract OSD pass per "
-        "page — the slow part). The other pre-flight checks still run."
-    ),
-)
-@click.option(
-    "--no-scan-page-order",
-    is_flag=True,
-    help=(
-        "Skip the page-order part of --scan-check (one OCR of the footer per "
-        "page, on scans carrying no QR codes or text layer)."
+        "which pages match no printed page so extraction skips them. When the "
+        "PDF is cut every N pages this needs sorting (--reorder; a typed PDF "
+        "cut by default also sorts with --blank-template), and moves those "
+        "pages to the end."
     ),
 )
 @click.option(
     "--blank-template",
     metavar="PDF",
     help=(
-        "Path to a blank version of the assignment template PDF. "
-        "For scans, pages are matched to it to judge page order (and to sort "
-        "by, with --reorder). For typed PDFs and --detect-boundaries it "
-        "locates page numbers more accurately and implicitly enables "
-        "--reorder (not with --fixed)."
-    ),
-)
-@click.option(
-    "--ollama-model",
-    default=ai_default("vision_model"),
-    show_default="from AI Setup",
-    help="Ollama vision model for reorder verification.",
-)
-@click.option(
-    "--ollama-host",
-    default=ai_default("host"),
-    show_default="from AI Setup",
-    help="Ollama server URL for reorder verification.",
-)
-@click.option(
-    "--ollama-timeout",
-    type=float,
-    default=ai_default("timeout_seconds"),
-    show_default="from AI Setup",
-    help="Ollama request timeout in seconds.",
-)
-@click.option(
-    "--llm-page-numbers/--no-llm-page-numbers",
-    default=ai_default("read_handwriting"),
-    show_default="from AI Setup",
-    help=(
-        "Last-resort tier for page-number footers the text recognition "
-        "cannot read (handwritten or stylized). Slower than the other "
-        "tiers, so it is only consulted when they come back with nothing."
+        "Path to a blank version of the assignment template PDF: one "
+        "submission long, so its length is the page count when none is given. "
+        "Pages are matched to it to judge page order (and to sort by, with "
+        "--reorder). For a typed PDF cut every N pages by default, it also "
+        "turns sorting on."
     ),
 )
 @click.pass_obj
@@ -596,8 +515,8 @@ def command(
     *,
     input_path: str,
     output: str,
+    split_method: str | None,
     pages_per_submission: int | None,
-    fixed: bool,
     start_page: int,
     end_page: int | None,
     filename_prefix: str,
@@ -605,30 +524,23 @@ def command(
     dry_run: bool,
     reorder: bool,
     reorder_only: tuple[str, ...],
-    detect_boundaries: bool,
     extra_work_pages: bool,
-    scan_check: bool,
-    fix_rotation: bool,
-    fix_order: bool,
-    no_scan_orientation: bool,
-    no_scan_page_order: bool,
     blank_template: str | None,
-    ollama_model: str,
-    ollama_host: str,
-    ollama_timeout: float,
-    llm_page_numbers: bool,
 ) -> None:
     """Split one scanned PDF that contains many student submissions into
     individual per-student PDF files.
     """
     emit = status_callback or print
 
-    if fixed and not pages_per_submission:
-        raise click.UsageError("--fixed needs --pages-per-submission.")
-    if fixed and detect_boundaries:
-        raise click.UsageError("--fixed and --detect-boundaries can't be used together.")
-    if fixed and reorder_only:
-        raise click.UsageError("--reorder-only needs pages matched to each other; use --reorder with --fixed.")
+    every_n = split_method == "every-n"
+    if every_n and not pages_per_submission and not blank_template:
+        raise click.UsageError(
+            "--split every-n needs --pages-per-submission (or a --blank-template to take it from)."
+        )
+    if every_n and reorder_only:
+        raise click.UsageError(
+            "--reorder-only needs pages matched to each other; use --reorder with --split every-n."
+        )
 
     input_pdf = Path(input_path)
     if not input_pdf.exists():
@@ -644,101 +556,102 @@ def command(
 
     egress.activate(Path(output))
 
-    if not detect_boundaries and not fixed and (pages_per_submission is None or _is_scan(input_pdf)):
-        _split_by_page_catalog(
+    # A blank template is one submission long: with no page count given, its
+    # length is the one expected. It checks the split and is the fallback cut
+    # size; it decides the cut by itself only with --split every-n.
+    template = _existing_template(blank_template)
+    template_pages = (
+        None if pages_per_submission or template is None
+        else _expected_pages_per_submission(None, str(template))
+    )
+    if every_n and not pages_per_submission:
+        if not template_pages:
+            raise click.UsageError(
+                "--split every-n: the blank template's page count could not be read; "
+                "give --pages-per-submission."
+            )
+        pages_per_submission = template_pages
+        emit(f"Cutting every {pages_per_submission} pages, the length of the blank template.")
+
+    find_starts = split_method == "find-starts" or (
+        not every_n and (pages_per_submission is None or _is_scan(input_pdf))
+    )
+    if find_starts:
+        expected_length = pages_per_submission or template_pages
+        split = _split_by_page_catalog(
             input_pdf,
             emit,
             output=Path(output),
             dry_run=dry_run,
             filename_prefix=filename_prefix,
             zero_pad_width=zero_pad_width,
-            pages_per_submission=pages_per_submission,
+            pages_per_submission=expected_length,
             extra_work_pages=extra_work_pages,
             reorder=reorder,
             reorder_only=_names(reorder_only),
-            blank_template=_existing_template(blank_template),
+            blank_template=template,
             # Asked only when a person ran this in a terminal: under the pipeline
             # or the app the same question is put by whoever started the run.
             interactive=status_callback is None and not dry_run and sys.stdin.isatty(),
         )
-        return
+        if split:
+            return
+        # The scan can't show where papers start: cut every N pages instead.
+        every_n = True
+        pages_per_submission = expected_length
+    assert pages_per_submission is not None
 
-    auto_reorder = False
-    if scan_check or fix_rotation or fix_order:
-        input_pdf, auto_reorder = _run_scan_preflight(
-            input_pdf,
-            emit,
-            output=output,
-            expected_pages=_expected_pages_per_submission(
-                pages_per_submission, blank_template
-            ),
-            check_orientation=not no_scan_orientation,
-            check_page_order=not no_scan_page_order,
-            fix_rotation=fix_rotation,
-            fix_order=fix_order,
-            has_blank_template=bool(blank_template),
-            dry_run=dry_run,
-        )
-
-    blank_template_layout = None
-    blank_template_path = _existing_template(blank_template)
-    if blank_template_path is not None:
-        blank_template_layout = _load_page_number_layout(blank_template_path)
-
-    use_boundary = detect_boundaries or pages_per_submission is None
-    # --extra-work-pages alone does not sort: with no template to say which pages are
-    # extra, sorting only pushes pages whose number went unread to the end.
-    uses_ordering_pass = reorder or auto_reorder or (blank_template and not fixed)
-    may_use_vlm = llm_page_numbers and (use_boundary or uses_ordering_pass)
-
-    if may_use_vlm:
-        resolved_for_reorder = app_config.with_overrides(
-            host=ollama_host,
-            vision_model=ollama_model,
-            timeout_seconds=ollama_timeout,
-        )
-        # No cloud pre-flight here: every vision call the splitter makes
-        # (page-number footers and Name/ID headers, used only to detect
-        # boundaries and reorder pages) is a whole-page read, and
-        # GuardedVisionReader (core/ocr/vision_reader.py) always redirects
-        # those to a local reader instead of a cloud host. A splitter run
-        # never sends anything to the cloud, so there is nothing to
-        # confirm — see _verified_vision_reader below, which still exits
-        # 2 if a cloud provider is selected without consent.
-    vision_reader = (
-        _verified_vision_reader(resolved_for_reorder, emit) if may_use_vlm else None
+    # Cutting every N pages reads nothing to find where a student starts, so
+    # the scan is checked first: pages turned upright, and the order put right
+    # after the cut where the page numbers can be trusted.
+    input_pdf, auto_reorder = _run_scan_preflight(
+        input_pdf,
+        emit,
+        output=output,
+        expected_pages=pages_per_submission,
+        has_blank_template=template is not None,
+        dry_run=dry_run,
     )
 
-    boundary_warnings: list[str] = []
-    if use_boundary:
-        emit("Detecting submission boundaries (page numbers and Name/ID headers)…")
-        ranges, boundary_warnings = plan_boundary_ranges(
-            input_pdf,
-            vision_reader=vision_reader,
-            expected_pages=_expected_pages_per_submission(
-                pages_per_submission, blank_template
-            ),
-            filename_prefix=filename_prefix,
-            zero_pad_width=zero_pad_width,
-            progress_callback=emit,
-        )
-        emit(f"Detected {len(ranges)} submission(s).")
-    else:
-        ranges = plan_submission_ranges(
-            total_pages=total_pages,
-            pages_per_submission=pages_per_submission,
-            start_page=start_page,
-            end_page=end_page,
-            filename_prefix=filename_prefix,
-            zero_pad_width=zero_pad_width,
-        )
-        boundary_warnings = [f"{group.name}: {warning}" for group in ranges for warning in group.warnings]
+    blank_template_layout = (
+        _load_page_number_layout(template) if template is not None else None
+    )
+
+    # A typed PDF cut by default sorts against its template; one cut every N
+    # pages on request sorts only on --reorder or trustworthy evidence.
+    # --extra-work-pages alone does not sort: with no template to say which pages are
+    # extra, sorting only pushes pages whose number went unread to the end.
+    uses_ordering_pass = reorder or auto_reorder or (
+        template is not None and split_method != "every-n"
+    )
+    resolved = resolved_ai()
+    # No cloud pre-flight here: every vision call the splitter makes (page-number
+    # footers, read only to reorder pages) is a whole-page read, and
+    # GuardedVisionReader (core/ocr/vision_reader.py) always redirects those to
+    # a local reader instead of a cloud host. A splitter run never sends anything
+    # to the cloud, so there is nothing to confirm — _verified_vision_reader
+    # still exits 2 if a cloud provider is selected without consent.
+    vision_reader = (
+        _verified_vision_reader(resolved, emit)
+        if uses_ordering_pass and resolved.read_handwriting
+        else None
+    )
+
+    ranges = plan_submission_ranges(
+        total_pages=total_pages,
+        pages_per_submission=pages_per_submission,
+        start_page=start_page,
+        end_page=end_page,
+        filename_prefix=filename_prefix,
+        zero_pad_width=zero_pad_width,
+    )
+    range_warnings = [f"{group.name}: {warning}" for group in ranges for warning in group.warnings]
 
     emit(f"Input: {input_pdf} ({total_pages} pages)")
     emit(f"Planned student splits: {len(ranges)}")
     for page_range in ranges:
         emit(f"  - {page_range.name}: pages {page_range.start_page}-{page_range.end_page}")
-    for warning in boundary_warnings:
+    for warning in range_warnings:
         print(f"Warning: {warning}", file=sys.stderr)
 
     if dry_run:
@@ -794,7 +707,7 @@ def command(
             )
     elif extra_work_pages:
         write_extra_pages_map(Path(output), {pdf_path.stem: () for pdf_path in created})
-        needs = "--reorder" if fixed else "--blank-template (or --reorder)"
+        needs = "--reorder" if every_n else "--blank-template (or --reorder)"
         emit(f"No extra work pages recorded: telling them apart needs {needs}. Pages were left as scanned.")
 
     from opengrader.core.pages.split_review import SplitPage, SplitPart, typical_submission

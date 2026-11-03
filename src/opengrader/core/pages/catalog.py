@@ -6,12 +6,16 @@ import re
 from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from pathlib import Path
+from threading import Lock
 from typing import Callable, Iterable, Iterator
 
 import cv2
 import numpy as np
 from PIL import Image
+
+from opengrader.core.qr_codes import OpengraderCode, decode_payload, encode_payload
 
 from .features import Alignment, PageFeatures, align, gray_for_matching, page_features, rectify
 from .layout import PART_LABEL_RE, QUESTION_LABEL_RE, PageLayout, QuestionLabel, is_page_number, page_layout, question_regions
@@ -27,6 +31,13 @@ _STRONG_INLIERS = 120
 _LABEL_MATCH = 0.45
 _LABELS_REQUIRED = 0.75
 _BLANK_FEATURES = 40
+# A template prints its QR code in the top-right corner; a page fed in turned
+# lands it in another corner, so all four are looked at — this much of the
+# page's width and height each.
+_QR_CORNER = (0.25, 0.2)
+# Pages read without finding a code before the rest of the scan is not looked
+# at: a stack printed without codes then costs a few reads, not one a page.
+_QR_GIVE_UP = 6
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,9 @@ class PageMatch:
     group: str | None
     homography: np.ndarray | None
     inliers: int = 0
+    # The page's own QR code, when it carries one: its page number, the
+    # paper's length, version and (personalized) student — exact, not read.
+    code: OpengraderCode | None = None
 
     @property
     def alignment(self) -> Alignment | None:
@@ -74,6 +88,12 @@ class PageCatalog:
     @property
     def expected_pages(self) -> list[int]:
         return sorted({g.page_number for g in self.groups.values() if g.page_number is not None})
+
+    @property
+    def qr_total_pages(self) -> int | None:
+        """A paper's length as its QR codes print it, or None without codes."""
+        totals = Counter(m.code.total_pages for m in self.matches if m.code is not None and m.code.total_pages)
+        return totals.most_common(1)[0][0] if totals else None
 
 
 def render(page: ScanPage, dpi: int, *, turns: int = 0) -> Image.Image:
@@ -102,13 +122,14 @@ def build_catalog(
     successors: dict[str, Counter] = {}
     previous: str | None = None
 
+    probe = _QrProbe()
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        loaded = _prefetch(pool, _load_for_matching, pages, window=4 * max(1, workers))
-        for position, (page, (gray, feats)) in enumerate(zip(pages, loaded), start=1):
+        loaded = _prefetch(pool, partial(_load_for_matching, probe=probe), pages, window=4 * max(1, workers))
+        for position, (page, (gray, feats, code)) in enumerate(zip(pages, loaded), start=1):
             if position % 25 == 0 or position == len(pages):
                 emit(f"  Matched {position}/{len(pages)} pages to {len(groups)} printed page(s)")
             if feats.count < _BLANK_FEATURES:
-                matches.append(PageMatch(page, None, None))
+                matches.append(PageMatch(page, None, None, code=code))
                 previous = None
                 continue
             hint = successors.get(previous, Counter()).most_common(1)[0][0] if previous in successors else None
@@ -116,16 +137,17 @@ def build_catalog(
             if found is None:
                 group = _new_group(page, f"g{len(groups) + 1:02d}", emit)
                 if group is None:
-                    matches.append(PageMatch(page, None, None))
+                    matches.append(PageMatch(page, None, None, code=code))
                     previous = None
                     continue
                 groups[group.id] = group
-                matches.append(PageMatch(page, group.id, turn_homography(group.reference_turns), group.features.count))
+                matches.append(PageMatch(page, group.id, turn_homography(group.reference_turns), group.features.count,
+                                         code=code))
                 current = group.id
             else:
                 group, alignment = found
                 group.members += 1
-                matches.append(PageMatch(page, group.id, alignment.homography, alignment.inliers))
+                matches.append(PageMatch(page, group.id, alignment.homography, alignment.inliers, code=code))
                 current = group.id
             if previous is not None:
                 successors.setdefault(previous, Counter())[current] += 1
@@ -135,6 +157,7 @@ def build_catalog(
     for group in groups.values():
         _confirm_layout(group, [m for m in matches if m.group == group.id])
         _read_title(group)
+    _number_from_codes(groups, matches)
     _number_pages(groups, matches)
     _classify_questions(list(groups.values()), workers)
     catalog = PageCatalog(groups=groups, matches=matches, directory=directory)
@@ -166,9 +189,70 @@ def _prefetch(pool: ThreadPoolExecutor, fn, items: list, *, window: int) -> Iter
         yield pending.popleft().result()
 
 
-def _load_for_matching(page: ScanPage) -> tuple[np.ndarray, PageFeatures]:
-    gray = gray_for_matching(render(page, 150))
-    return gray, page_features(gray)
+def _load_for_matching(
+    page: ScanPage, *, probe: _QrProbe | None = None
+) -> tuple[np.ndarray, PageFeatures, OpengraderCode | None]:
+    image = render(page, 150)
+    gray = gray_for_matching(image)
+    return gray, page_features(gray), probe.read(image) if probe is not None else None
+
+
+class _QrProbe:
+    """Reads each page's QR code until a scan has shown it carries none.
+
+    Shared by the loading threads; once `_QR_GIVE_UP` pages have been read
+    without one being found, the rest are not looked at. A scan that has
+    shown a code is read to the end.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._found = False
+        self._misses = 0
+
+    def read(self, image: Image.Image) -> OpengraderCode | None:
+        with self._lock:
+            if not self._found and self._misses >= _QR_GIVE_UP:
+                return None
+        code = corner_code(image)
+        with self._lock:
+            if code is not None:
+                self._found = True
+            else:
+                self._misses += 1
+        return code
+
+
+def corner_code(image: Image.Image) -> OpengraderCode | None:
+    """The Opengrader QR code in a corner of this page image, or None.
+
+    Only the corners are searched — a quarter of the page in all — which is
+    where a template prints its code however the sheet was fed in.
+    """
+    from opengrader.core.ocr.qr_reader import read_code_from_image
+
+    width, height = image.size
+    w, h = round(width * _QR_CORNER[0]), round(height * _QR_CORNER[1])
+    for box in ((width - w, 0, width, h), (0, height - h, w, height), (0, 0, w, h), (width - w, height - h, width, height)):
+        try:
+            code = read_code_from_image(image.crop(box))
+        except Exception:  # noqa: BLE001 - an unreadable corner is no code
+            code = None
+        if code is not None:
+            return code
+    return None
+
+
+def _number_from_codes(groups: dict[str, PageGroup], matches: list[PageMatch]) -> None:
+    """A printed page's number is what its copies' QR codes say, when they
+    carry one: exact where the footer was only read. Copies whose code was
+    not read take the number from the rest of their group."""
+    printed: dict[str, Counter] = {}
+    for match in matches:
+        if match.group is not None and match.code is not None and match.code.page is not None:
+            printed.setdefault(match.group, Counter())[match.code.page] += 1
+    for group_id, numbers in printed.items():
+        groups[group_id].page_number = numbers.most_common(1)[0][0]
 
 
 def _assign(feats: PageFeatures, gray: np.ndarray, groups: dict[str, PageGroup], hint: str | None):
@@ -422,6 +506,7 @@ def save_catalog(catalog: PageCatalog, directory: Path) -> Path:
             {
                 "pdf": _stored(m.page.pdf, directory), "index": m.page.index, "group": m.group,
                 "homography": m.homography.tolist() if m.homography is not None else None, "inliers": m.inliers,
+                **({"qr": encode_payload(m.code)} if m.code is not None else {}),
             }
             for m in catalog.matches
         ],
@@ -447,7 +532,8 @@ def load_catalog(directory: Path) -> PageCatalog:
         )
     matches = [
         PageMatch(ScanPage((directory / p["pdf"]).resolve(), p["index"]), p["group"],
-                  np.array(p["homography"]) if p["homography"] is not None else None, p["inliers"])
+                  np.array(p["homography"]) if p["homography"] is not None else None, p["inliers"],
+                  code=decode_payload(p.get("qr")))
         for p in data["pages"]
     ]
     return PageCatalog(groups=groups, matches=matches, directory=directory)

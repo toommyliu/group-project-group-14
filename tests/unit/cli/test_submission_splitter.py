@@ -67,6 +67,16 @@ def test_no_sidecar_without_the_flag(tmp_path: Path, monkeypatch) -> None:
     assert not resolve_extra_pages_path(out).exists()
 
 
+@pytest.fixture(autouse=True)
+def upright(monkeypatch):
+    """Every-N cuts always check the scan; read every page as upright unless a
+    test says otherwise, so no test waits on Tesseract's orientation pass."""
+    monkeypatch.setattr(
+        "opengrader.core.submissions.scan_check.detect_page_orientation",
+        lambda _image: (0, 12.0),
+    )
+
+
 @pytest.fixture
 def upside_down(monkeypatch):
     monkeypatch.setattr(
@@ -79,7 +89,7 @@ def _messages(capture: list[str]):
     return "\n".join(capture)
 
 
-def test_fix_rotation_turns_pages_before_they_are_split(
+def test_an_every_n_cut_turns_pages_upright_before_cutting(
     tmp_path: Path, monkeypatch, upside_down
 ) -> None:
     _no_ollama(monkeypatch)
@@ -91,7 +101,6 @@ def test_fix_rotation_turns_pages_before_they_are_split(
             "--input", str(bundle),
             "--output", str(out),
             "--pages-per-submission", "2",
-            "--fix-rotation",
         ],
         status_callback=lambda _message: None,
     )
@@ -113,7 +122,6 @@ def test_the_corrected_copy_hides_from_submission_discovery(
             "--input", str(bundle),
             "--output", str(out),
             "--pages-per-submission", "2",
-            "--fix-rotation",
         ],
         status_callback=lambda _message: None,
     )
@@ -137,36 +145,11 @@ def test_the_original_scan_is_never_modified(
             "--input", str(bundle),
             "--output", str(tmp_path / "split"),
             "--pages-per-submission", "2",
-            "--fix-rotation",
         ],
         status_callback=lambda _message: None,
     )
 
     assert bundle.read_bytes() == before
-
-
-def test_scan_check_reports_without_fixing(
-    tmp_path: Path, monkeypatch, capsys, upside_down
-) -> None:
-    _no_ollama(monkeypatch)
-    bundle = _bundle(tmp_path / "scans.pdf", 4)
-    out = tmp_path / "split"
-    messages: list[str] = []
-
-    submission_splitter.run_cli(
-        [
-            "--input", str(bundle),
-            "--output", str(out),
-            "--pages-per-submission", "2",
-            "--scan-check",
-        ],
-        status_callback=messages.append,
-    )
-
-    assert "--fix-rotation" in _messages(messages)
-    assert not (out / ".opengrader" / "scans-upright.pdf").exists()
-    assert (out / "submission-0001.pdf").exists()
-    assert "rotated 180" in capsys.readouterr().err
 
 
 def test_the_page_count_check_uses_the_declared_submission_length(
@@ -180,8 +163,6 @@ def test_the_page_count_check_uses_the_declared_submission_length(
             "--input", str(bundle),
             "--output", str(tmp_path / "split"),
             "--pages-per-submission", "2",
-            "--scan-check",
-            "--no-scan-orientation",
         ],
         status_callback=lambda _message: None,
     )
@@ -202,7 +183,6 @@ def test_dry_run_writes_no_corrected_copy(
             "--input", str(bundle),
             "--output", str(out),
             "--pages-per-submission", "2",
-            "--fix-rotation",
             "--dry-run",
         ],
         status_callback=messages.append,
@@ -253,7 +233,7 @@ def _ocr_page_numbers(monkeypatch, numbers) -> None:
     )
 
 
-def test_fix_order_sorts_pages_when_the_numbers_are_exact(
+def test_an_every_n_cut_sorts_pages_when_the_numbers_are_exact(
     tmp_path: Path, monkeypatch
 ) -> None:
     _no_ollama(monkeypatch)
@@ -265,8 +245,6 @@ def test_fix_order_sorts_pages_when_the_numbers_are_exact(
             "--input", str(bundle),
             "--output", str(out),
             "--pages-per-submission", "3",
-            "--fix-order",
-            "--no-scan-orientation",
         ],
         status_callback=lambda _message: None,
     )
@@ -275,7 +253,7 @@ def test_fix_order_sorts_pages_when_the_numbers_are_exact(
     assert _footers(out / "submission-0002.pdf") == ["Page 1", "Page 2", "Page 3"]
 
 
-def test_fix_order_refuses_to_act_on_an_ocr_reading(
+def test_an_every_n_cut_never_sorts_on_an_ocr_reading(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     _no_ollama(monkeypatch)
@@ -288,8 +266,6 @@ def test_fix_order_refuses_to_act_on_an_ocr_reading(
             "--input", str(_numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2])),
             "--output", str(tmp_path / "split"),
             "--pages-per-submission", "3",
-            "--fix-order",
-            "--no-scan-orientation",
         ],
         status_callback=messages.append,
     )
@@ -312,10 +288,9 @@ def test_a_blank_template_makes_an_ocr_reading_actionable(
         [
             "--input", str(_numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2])),
             "--output", str(tmp_path / "split"),
+            "--split", "every-n",
             "--pages-per-submission", "3",
             "--blank-template", str(_numbered_bundle(tmp_path / "blank.pdf", [1, 2, 3])),
-            "--fix-order",
-            "--no-scan-orientation",
         ],
         status_callback=lambda _message: None,
     )
@@ -323,7 +298,7 @@ def test_a_blank_template_makes_an_ocr_reading_actionable(
     assert reordered, "a template should authorize the correction"
 
 
-def test_fix_order_costs_nothing_on_a_scan_that_is_in_order(
+def test_sorting_costs_nothing_on_a_scan_that_is_in_order(
     tmp_path: Path, monkeypatch
 ) -> None:
     _no_ollama(monkeypatch)
@@ -337,38 +312,11 @@ def test_fix_order_costs_nothing_on_a_scan_that_is_in_order(
         [
             "--input", str(_numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3, 1, 2, 3])),
             "--output", str(tmp_path / "split"),
+            "--split", "every-n",
             "--pages-per-submission", "3",
-            "--fix-order",
-            "--no-scan-orientation",
         ],
         status_callback=lambda _message: None,
     )
-
-
-def test_scan_check_alone_reports_the_order_without_touching_it(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    _no_ollama(monkeypatch)
-
-    def _boom(*_args, **_kwargs):  # pragma: no cover
-        raise AssertionError("--scan-check must not reorder anything")
-
-    monkeypatch.setattr(submission_splitter, "reorder_pdf_pages", _boom)
-    messages: list[str] = []
-
-    submission_splitter.run_cli(
-        [
-            "--input", str(_numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2])),
-            "--output", str(tmp_path / "split"),
-            "--pages-per-submission", "3",
-            "--scan-check",
-            "--no-scan-orientation",
-        ],
-        status_callback=messages.append,
-    )
-
-    assert "--fix-order" in _messages(messages)
-    assert "out of order" in capsys.readouterr().err
 
 
 def _record_vlm_calls(monkeypatch) -> list[int]:
@@ -381,54 +329,19 @@ def _record_vlm_calls(monkeypatch) -> list[int]:
     return calls
 
 
-def test_llm_page_numbers_off_skips_vlm_even_during_boundary_detection(
+def test_sorting_reads_page_numbers_with_ai_when_ai_setup_reads_handwriting(
     tmp_path: Path, monkeypatch
 ) -> None:
-    calls = _record_vlm_calls(monkeypatch)
-    bundle = _bundle(tmp_path / "scans.pdf", 4)
-
-    submission_splitter.run_cli(
-        [
-            "--input", str(bundle),
-            "--output", str(tmp_path / "split"),
-            "--detect-boundaries",
-            "--no-llm-page-numbers",
-        ],
-        status_callback=lambda _message: None,
-    )
-
-    assert calls == []
-
-
-def test_llm_page_numbers_on_uses_vlm_during_boundary_detection(
-    tmp_path: Path, monkeypatch
-) -> None:
-    calls = _record_vlm_calls(monkeypatch)
-    bundle = _bundle(tmp_path / "scans.pdf", 4)
-
-    submission_splitter.run_cli(
-        [
-            "--input", str(bundle),
-            "--output", str(tmp_path / "split"),
-            "--detect-boundaries",
-            "--llm-page-numbers",
-        ],
-        status_callback=lambda _message: None,
-    )
-
-    assert calls == [1]
-
-
-def test_llm_page_numbers_defaults_from_ai_setup(tmp_path: Path, monkeypatch) -> None:
     app_config.save_settings(app_config.AISettings(read_handwriting=True))
     calls = _record_vlm_calls(monkeypatch)
-    bundle = _bundle(tmp_path / "scans.pdf", 4)
+    _record_reorder_calls(monkeypatch)
 
     submission_splitter.run_cli(
         [
-            "--input", str(bundle),
+            "--input", str(_bundle(tmp_path / "scans.pdf", 4)),
             "--output", str(tmp_path / "split"),
-            "--detect-boundaries",
+            "--pages-per-submission", "2",
+            "--reorder",
         ],
         status_callback=lambda _message: None,
     )
@@ -436,18 +349,19 @@ def test_llm_page_numbers_defaults_from_ai_setup(tmp_path: Path, monkeypatch) ->
     assert calls == [1]
 
 
-def test_llm_page_numbers_defaults_off_when_ai_setup_leaves_it_off(
+def test_no_ai_reads_page_numbers_when_ai_setup_leaves_handwriting_off(
     tmp_path: Path, monkeypatch
 ) -> None:
     app_config.save_settings(app_config.AISettings())
     calls = _record_vlm_calls(monkeypatch)
-    bundle = _bundle(tmp_path / "scans.pdf", 4)
+    _record_reorder_calls(monkeypatch)
 
     submission_splitter.run_cli(
         [
-            "--input", str(bundle),
+            "--input", str(_bundle(tmp_path / "scans.pdf", 4)),
             "--output", str(tmp_path / "split"),
-            "--detect-boundaries",
+            "--pages-per-submission", "2",
+            "--reorder",
         ],
         status_callback=lambda _message: None,
     )
@@ -455,24 +369,49 @@ def test_llm_page_numbers_defaults_off_when_ai_setup_leaves_it_off(
     assert calls == []
 
 
-def test_no_preflight_runs_unless_asked(tmp_path: Path, monkeypatch) -> None:
-    def _boom(_image):  # pragma: no cover
-        raise AssertionError("the scan pre-flight should not have run")
-
-    monkeypatch.setattr(
-        "opengrader.core.submissions.scan_check.detect_page_orientation", _boom
-    )
-    _no_ollama(monkeypatch)
-    bundle = _bundle(tmp_path / "scans.pdf", 4)
+def test_no_ai_reads_page_numbers_when_nothing_is_sorted(tmp_path: Path, monkeypatch) -> None:
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
+    calls = _record_vlm_calls(monkeypatch)
 
     submission_splitter.run_cli(
         [
-            "--input", str(bundle),
+            "--input", str(_bundle(tmp_path / "scans.pdf", 4)),
             "--output", str(tmp_path / "split"),
+            "--split", "every-n",
             "--pages-per-submission", "2",
         ],
         status_callback=lambda _message: None,
     )
+
+    assert calls == []
+
+
+def test_page_matching_runs_no_scan_check_of_its_own(tmp_path: Path, monkeypatch) -> None:
+    def _boom(*_args, **_kwargs):  # pragma: no cover
+        raise AssertionError("page matching turns and orders pages itself")
+
+    monkeypatch.setattr(submission_splitter, "analyze_scan_pdf", _boom)
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 1, 2])
+    _scanned_catalog(monkeypatch, bundle, [1, 2, 1, 2])
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(tmp_path / "split")],
+        status_callback=lambda _message: None,
+    )
+
+    assert (tmp_path / "split" / "submission-0002.pdf").exists()
+
+
+def test_removed_flags_are_refused(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path / "scans.pdf", 2)
+    for flag in ("--fixed", "--detect-boundaries", "--scan-check", "--fix-rotation", "--fix-order",
+                 "--no-scan-orientation", "--no-scan-page-order", "--llm-page-numbers"):
+        with pytest.raises(SystemExit) as refused:
+            submission_splitter.run_cli(
+                ["--input", str(bundle), "--output", str(tmp_path / "split"), flag],
+                status_callback=lambda _message: None,
+            )
+        assert refused.value.code == 2, flag
 
 
 def _scanned_catalog(monkeypatch, bundle: Path, sequence: list[int]) -> None:
@@ -612,3 +551,106 @@ def test_reorder_only_sorts_the_named_submission_and_leaves_the_rest(
     assert _footers(out / "submission-0002.pdf") == ["Page 1", "Page 2", "Page 3"]
     assert [finding.name for finding in pending_findings(out)] == ["submission-0001"]
     assert "submission-0007" in capsys.readouterr().err
+
+
+def _unreadable_catalog(monkeypatch, bundle: Path, pages: int, length: int) -> None:
+    """A scan whose printed pages are told apart but carry no page number read."""
+    import numpy as np
+
+    from opengrader.core.pages import catalog as catalog_module
+    from opengrader.core.pages.catalog import PageCatalog, PageGroup, PageMatch, ScanPage
+    from opengrader.core.pages.layout import PageLayout
+
+    groups = {
+        f"g{n}": PageGroup(id=f"g{n}", reference=ScanPage(bundle, 0), reference_turns=0,
+                           layout=PageLayout(), page_number=None)
+        for n in range(length)
+    }
+    matches = [PageMatch(ScanPage(bundle, index), f"g{index % length}", np.eye(3), 100)
+               for index in range(pages)]
+    monkeypatch.setattr(submission_splitter, "_is_scan", lambda _pdf: True)
+    monkeypatch.setattr(
+        catalog_module, "build_catalog",
+        lambda pages, directory=None, **_kwargs: PageCatalog(groups=groups, matches=matches, directory=directory),
+    )
+
+
+def test_a_scan_without_readable_page_numbers_is_cut_every_n_pages(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3] * 3)
+    _unreadable_catalog(monkeypatch, bundle, pages=9, length=3)
+    out = tmp_path / "split"
+    messages: list[str] = []
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out), "--pages-per-submission", "3"],
+        status_callback=messages.append,
+    )
+
+    written = sorted(out.glob("*.pdf"))
+    assert [len(PdfReader(str(pdf)).pages) for pdf in written] == [3, 3, 3]
+    assert all(_footers(pdf) == ["Page 1", "Page 2", "Page 3"] for pdf in written)
+    assert "cut every 3 pages instead" in _messages(messages)
+    assert "Can't tell where each paper starts" in capsys.readouterr().err
+
+
+def test_a_scan_without_readable_page_numbers_or_a_page_count_stops(
+    tmp_path: Path, monkeypatch
+) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3] * 3)
+    _unreadable_catalog(monkeypatch, bundle, pages=9, length=3)
+    out = tmp_path / "split"
+
+    with pytest.raises(SystemExit) as stopped:
+        submission_splitter.run_cli(
+            ["--input", str(bundle), "--output", str(out)], status_callback=lambda _message: None
+        )
+
+    assert "Can't tell where each student's paper starts" in str(stopped.value.code)
+    assert "--pages-per-submission" in str(stopped.value.code)
+    assert not list(out.glob("*.pdf"))
+
+
+def test_a_blank_template_is_the_fallback_cut_size_when_no_page_count_is_given(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3] * 3)
+    template = _numbered_bundle(tmp_path / "blank.pdf", [1, 2, 3])
+    _unreadable_catalog(monkeypatch, bundle, pages=9, length=3)
+    out = tmp_path / "split"
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out), "--blank-template", str(template)],
+        status_callback=lambda _message: None,
+    )
+
+    assert [len(PdfReader(str(pdf)).pages) for pdf in sorted(out.glob("*.pdf"))] == [3, 3, 3]
+    assert "cut every 3 pages instead" in capsys.readouterr().err
+
+
+def test_every_n_takes_its_page_count_from_the_blank_template(tmp_path: Path) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3] * 2)
+    template = _numbered_bundle(tmp_path / "blank.pdf", [1, 2, 3])
+    out = tmp_path / "split"
+    messages: list[str] = []
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out), "--split", "every-n", "--blank-template", str(template)],
+        status_callback=messages.append,
+    )
+
+    assert [len(PdfReader(str(pdf)).pages) for pdf in sorted(out.glob("*.pdf"))] == [3, 3]
+    assert "the length of the blank template" in _messages(messages)
+
+
+def test_every_n_without_a_page_count_or_template_is_refused(tmp_path: Path) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3])
+
+    with pytest.raises(SystemExit) as stopped:
+        submission_splitter.run_cli(
+            ["--input", str(bundle), "--output", str(tmp_path / "split"), "--split", "every-n"],
+            status_callback=lambda _message: None,
+        )
+
+    assert stopped.value.code == 2

@@ -119,7 +119,6 @@ CASES = [
         "x = 4",
     ),
     ("extract_page_number", {}, '{"value": "3"}', 3),
-    ("page_has_identity_field", {}, '{"first_page": true}', True),
 ]
 
 

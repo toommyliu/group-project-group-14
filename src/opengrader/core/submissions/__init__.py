@@ -27,11 +27,6 @@ from .splitter import (
     plan_submission_ranges,
     split_scanned_submission_pdf,
 )
-from .boundary import (
-    DetectedBoundaries,
-    detect_submission_boundaries,
-    plan_boundary_ranges,
-)
 from .review import (
     ReviewFlag,
     ReviewReason,
@@ -206,9 +201,6 @@ __all__ = [
     "SubmissionPageRange",
     "plan_submission_ranges",
     "split_scanned_submission_pdf",
-    "DetectedBoundaries",
-    "detect_submission_boundaries",
-    "plan_boundary_ranges",
     "ReviewFlag",
     "ReviewReason",
     "ReviewSeverity",

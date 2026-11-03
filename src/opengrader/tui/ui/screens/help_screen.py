@@ -480,6 +480,22 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "opengrader run --fix-split / --keep-split, merge-submissions.",
     ),
     (
+        "How the scan is split",
+        "The card asks how to split the scan into one PDF per student. 'Every "
+        "N pages' cuts it into equal pieces of Pages per submission — the "
+        "simplest choice when every paper has the same number of pages; a page "
+        "count that isn't a whole number of papers is pointed out before the "
+        "run. 'Find where each paper starts' reads the printed page numbers, so "
+        "papers may differ in length; there the page count only checks the "
+        "result. If too few page numbers can be read to tell where papers "
+        "start, the scan is cut every N pages instead, or, with no page count, "
+        "the run stops and asks for one rather than guess. A blank Pages per "
+        "submission stands for the blank template's length, when there is one. "
+        "CLI: opengrader run asks once per class folder in a terminal, showing "
+        "how the page count divides the scan; --split every-n or find-starts "
+        "answers up front.",
+    ),
+    (
         "Grade while it runs",
         "Extraction is the longest stage, so don't wait for it: with 'Start "
         "grading as submissions arrive' ticked (the default) the grading "
@@ -488,7 +504,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Settings, and what is remembered",
-        "Settings holds what most runs need: pages per submission, the roster, "
+        "Settings holds what most runs need: the roster, "
         "the blank template, grading as submissions arrive, sorting "
         "out-of-order pages and drafting rubric items. Each Run Pipeline "
         "saves what you chose. What describes the assignment is saved inside "
@@ -828,7 +844,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "answer, and a swapped sheet is worse still: it grades cleanly against "
         "the wrong question. --fix writes an upright copy; your original scan is "
         "never modified. Out-of-order pages are reported here and put right by "
-        "the splitter's --fix-order, which only acts when the page numbers came "
+        "the splitter when it cuts every N pages, only where the page numbers came "
         "from QR codes, a PDF text layer or a blank template — where they were "
         "merely read off the scan it tells you and leaves them alone, since a "
         "misread number would move a page that was already correct. Page order "

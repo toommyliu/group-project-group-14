@@ -92,10 +92,15 @@ def machine_settings_path() -> Path:
 
 
 def load_folder_settings(folder: str | Path) -> FolderPipelineSettings | None:
-    """The settings saved for this class folder, or None when there are none."""
+    """The settings saved for this class folder, or None when there are none.
+
+    A file holding only how to split the scan (`save_split_choice`, written by
+    `opengrader run`) is not the card's settings: applying it would untick the
+    roster and template the folder scan found. Read it with `load_split_choice`.
+    """
     root = Path(folder)
     data = _read(folder_settings_path(root))
-    if data is None:
+    if data is None or not set(data) - _SPLIT_CHOICE_ONLY:
         return None
 
     values: dict[str, object] = {}
@@ -134,6 +139,26 @@ def save_folder_settings(folder: str | Path, settings: FolderPipelineSettings) -
     if settings.section_scans:
         body["section_scans"] = list(settings.section_scans)
     return _write(folder_settings_path(root), body)
+
+
+_SPLIT_CHOICE_ONLY = frozenset({"version", "fixed_split"})
+
+
+def load_split_choice(folder: str | Path) -> bool | None:
+    """How this folder's scan is split, once someone chose: True to cut every
+    N pages, False to find where each paper starts, None when never chosen."""
+    data = _read(folder_settings_path(Path(folder)))
+    choice = data.get("fixed_split") if data is not None else None
+    return choice if isinstance(choice, bool) else None
+
+
+def save_split_choice(folder: str | Path, fixed: bool) -> Path:
+    """Remember how to split this folder's scan, leaving every other saved
+    setting as it is (a folder with none saved gets nothing else)."""
+    path = folder_settings_path(Path(folder))
+    data = _read(path) or {"version": _VERSION}
+    data["fixed_split"] = fixed
+    return _write(path, data)
 
 
 def load_machine_settings() -> MachinePipelineSettings:

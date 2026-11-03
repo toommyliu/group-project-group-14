@@ -19,9 +19,8 @@ brings its own reader:
   For a cloud provider, the operations that could show a student's identity
   are instead run against a local Ollama reader, if one is usable, and raise
   `IdentityFieldBlocked` otherwise: `extract_field_text` (name/ID crops),
-  `extract_title_metadata` (the cover-page title crop), `page_has_identity_field`
-  (a whole page, asked whether it is the cover page — so it may be the cover
-  page), and `extract_page_number`: `reorder.py` sends it WHOLE pages at 150
+  `extract_title_metadata` (the cover-page title crop), and
+  `extract_page_number`: `reorder.py` sends it WHOLE pages at 150
   dpi, in unknown order, as the last fallback after the text layer, QR code,
   template layout and Tesseract have failed — page 1 among them. There is no
   way to know a page is not the cover page before reading it, so it is
@@ -111,10 +110,6 @@ class VisionReader(Protocol):
         """Read the page number printed at the foot of a scanned page."""
         ...
 
-    def page_has_identity_field(self, *, image_path: str | Path) -> bool:
-        """Is this the cover page — does it carry a Name or Student ID field?"""
-        ...
-
 
 @dataclass(frozen=True)
 class OllamaVisionReader:
@@ -159,13 +154,6 @@ class OllamaVisionReader:
         from . import ollama_vlm
 
         return ollama_vlm.extract_page_number(
-            image_path=image_path, config=self.config
-        )
-
-    def page_has_identity_field(self, *, image_path: str | Path) -> bool:
-        from . import ollama_vlm
-
-        return ollama_vlm.page_has_identity_field(
             image_path=image_path, config=self.config
         )
 
@@ -265,23 +253,6 @@ class DialectVisionReader:
             num_predict=request.num_predict,
         )
         return vision_prompts.parse_page_number(raw)
-
-    def page_has_identity_field(self, *, image_path: str | Path) -> bool:
-        from opengrader.core.llm import dialect_client
-
-        from . import vision_prompts
-
-        request = vision_prompts.identity_field_request()
-        raw = dialect_client.generate(
-            config=self.config,
-            prompt=request.prompt,
-            system_prompt=request.system_prompt,
-            options={"temperature": 0, "think": False},
-            images=[vision_prompts.image_to_base64(image_path)],
-            response_format=request.response_schema,
-            num_predict=request.num_predict,
-        )
-        return vision_prompts.parse_identity_field(raw)
 
 
 class CloudCallBlocked(RuntimeError):
@@ -440,8 +411,8 @@ class GuardedVisionReader:
 
         This is the only identity-bearing operation whose *output* is a
         student's identity, so it is the only one `read_identity_locally`
-        governs: `extract_title_metadata`, `page_has_identity_field` and
-        `extract_page_number` return a title, a yes/no or a page number, never
+        governs: `extract_title_metadata` and `extract_page_number` return a
+        title or a page number, never
         a name or ID, and run exactly as before regardless of this setting.
         When the setting is off, this raises before touching `self.inner`,
         `local_identity_config`, or any model — local or cloud alike.
@@ -465,13 +436,6 @@ class GuardedVisionReader:
             what="The cover-page title",
             category="title-image",
             run=lambda reader: reader.extract_title_metadata(image_path=image_path),
-        )
-
-    def page_has_identity_field(self, *, image_path: str | Path) -> bool:
-        return self._identity_call(
-            what="A whole scanned page",
-            category="page-image",
-            run=lambda reader: reader.page_has_identity_field(image_path=image_path),
         )
 
     def extract_page_number(self, *, image_path: str | Path) -> int | None:

@@ -80,7 +80,6 @@ class _StubVisionReader:
     qa_value: tuple[str, str] = ("What is a stack?", "A LIFO data structure.")
     handwriting_value: str = "handwritten answer text"
     page_number_value: int | None = 1
-    first_page_value: bool = True
     # Matches `GuardedVisionReader.provider` / `DialectVisionReader` readers,
     # which every real VisionReader exposes; `getattr(reader, "provider", None)`
     # is how the extraction code records it onto `response_provider`.
@@ -127,10 +126,6 @@ class _StubVisionReader:
     def extract_page_number(self, *, image_path):
         self.calls.append(("extract_page_number", image_path))
         return self.page_number_value
-
-    def page_has_identity_field(self, *, image_path):
-        self.calls.append(("page_has_identity_field", image_path))
-        return self.first_page_value
 
 
 @pytest.fixture(autouse=True)

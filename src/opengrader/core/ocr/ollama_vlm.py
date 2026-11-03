@@ -23,7 +23,6 @@ __all__ = [
     "extract_question_prompt_and_answer",
     "extract_handwriting_only",
     "extract_page_number",
-    "page_has_identity_field",
 ]
 
 
@@ -208,21 +207,3 @@ def extract_page_number(
         num_predict=request.num_predict,
     )
     return vision_prompts.parse_page_number(raw)
-
-
-def page_has_identity_field(
-    *,
-    image_path: str | Path,
-    config: OllamaVisionConfig,
-) -> bool:
-    _identity_read_stays_local(config, "A whole scanned page")
-    request = vision_prompts.identity_field_request()
-    raw = _generate_with_image(
-        image_path=image_path,
-        prompt=request.prompt,
-        system_prompt=request.system_prompt,
-        config=config,
-        response_format=request.response_schema,
-        num_predict=request.num_predict,
-    )
-    return vision_prompts.parse_identity_field(raw)

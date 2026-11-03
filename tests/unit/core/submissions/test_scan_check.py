@@ -298,13 +298,13 @@ def test_out_of_order_pages_are_high_severity_and_not_fixable_here() -> None:
     assert issue.severity == "high"
     assert issue.page == 1
     assert issue.fixable is False
-    assert "--fix-order" in issue.detail
+    assert "--split every-n" in issue.detail
 
 
 def test_the_remedy_offered_depends_on_how_the_numbers_were_read() -> None:
     ocr_issues = build_scan_issues(_numbered(*_ocr(1, 3, 2)), pages_per_submission=3)
     (issue,) = [i for i in ocr_issues if i.kind is ScanIssueKind.PAGE_ORDER]
-    assert "--fix-order" not in issue.detail
+    assert "--split every-n" not in issue.detail
     assert "misread" in issue.detail
     assert "--reorder" in issue.detail
 

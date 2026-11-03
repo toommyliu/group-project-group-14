@@ -137,3 +137,26 @@ def test_section_scans_ticked_with_none_typed_keep_what_the_folder_finds(tmp_pat
     saved = json.loads(folder_settings_path(tmp_path).read_text(encoding="utf-8"))
     assert saved["use_section_scans"] is True
     assert "section_scans" not in saved
+
+
+def test_a_split_choice_alone_is_not_the_cards_settings(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import load_split_choice, save_split_choice
+
+    assert load_split_choice(tmp_path) is None
+    save_split_choice(tmp_path, True)
+
+    assert load_split_choice(tmp_path) is True
+    # Applying a default card would untick the roster the folder scan found.
+    assert load_folder_settings(tmp_path) is None
+
+
+def test_a_split_choice_leaves_the_other_saved_settings_alone(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import load_split_choice, save_split_choice
+
+    save_folder_settings(tmp_path, FolderPipelineSettings(pages_per_submission=6, use_roster=True))
+    save_split_choice(tmp_path, True)
+
+    saved = load_folder_settings(tmp_path)
+    assert saved is not None
+    assert (saved.pages_per_submission, saved.use_roster, saved.fixed_split) == (6, True, True)
+    assert load_split_choice(tmp_path) is True

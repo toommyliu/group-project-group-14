@@ -121,19 +121,3 @@ class PydanticAIVisionReader:
             num_predict=request.num_predict,
         )
         return vision_prompts.parse_page_number(raw)
-
-    def page_has_identity_field(self, *, image_path: str | Path) -> bool:
-        from opengrader.core.llm import pydantic_ai_client
-
-        from . import vision_prompts
-
-        request = vision_prompts.identity_field_request()
-        raw = pydantic_ai_client.generate(
-            config=self.config,
-            prompt=request.prompt,
-            system_prompt=request.system_prompt,
-            images=[vision_prompts.image_to_base64(image_path)],
-            response_schema=request.response_schema,
-            num_predict=request.num_predict,
-        )
-        return vision_prompts.parse_identity_field(raw)

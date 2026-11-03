@@ -36,7 +36,7 @@ Note:
   restart at 1 for every student, so they can only be put back in order after
   the bundle is split. Fix them with:
     opengrader submission-splitter --input scans/all.pdf --output split/ \\
-        --pages-per-submission 6 --fix-order
+        --split every-n --pages-per-submission 6
 """
 
 _SEVERITY_GLYPH = {"high": "●", "medium": "◐", "low": "○"}

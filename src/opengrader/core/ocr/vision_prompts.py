@@ -25,8 +25,6 @@ __all__ = [
     "parse_handwriting_only",
     "page_number_request",
     "parse_page_number",
-    "identity_field_request",
-    "parse_identity_field",
 ]
 
 
@@ -301,36 +299,3 @@ def parse_page_number(raw: str) -> int | None:
             except (ValueError, TypeError):
                 pass
     return None
-
-
-# ---------------------------------------------------------------------------
-# page_has_identity_field
-# ---------------------------------------------------------------------------
-
-_FIRST_PAGE_SCHEMA = {
-    "type": "object",
-    "properties": {"first_page": {"type": "boolean"}},
-    "required": ["first_page"],
-}
-
-
-def identity_field_request() -> VisionRequest:
-    prompt = (
-        "You are inspecting one scanned assignment page. Does this page contain "
-        "a student Name field/label or a Student ID (student number) field/label "
-        "near the top — i.e. is it the first or cover page of a submission? "
-        "Return strict JSON only with this shape: {\"first_page\": true} or "
-        "{\"first_page\": false}."
-    )
-    return VisionRequest(prompt=prompt, response_schema=_FIRST_PAGE_SCHEMA, num_predict=128)
-
-
-def parse_identity_field(raw: str) -> bool:
-    parsed = parse_json_object(raw)
-    if parsed is not None:
-        value = parsed.get("first_page")
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"true", "yes", "1"}
-    return False

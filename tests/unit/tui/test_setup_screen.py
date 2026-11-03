@@ -2328,3 +2328,102 @@ def test_the_ai_assistant_card_offers_only_what_the_class_folder_is_ready_for(tm
     assert with_submissions == {"run-assistant-rubrics", "run-assistant"}
     assert "1 submission(s)" in state_text
     assert opened == (AssistantScreen, "rubrics")
+
+
+def test_how_to_split_the_scan_is_on_the_card_not_under_settings() -> None:
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            return [
+                [ancestor.id for ancestor in app.query_one(selector).ancestors]
+                for selector in ("#pipe-split-method", "#pipe-pages")
+            ]
+
+    for ancestors in asyncio.run(run()):
+        assert "section-pipeline" in ancestors
+        assert "pipe-settings" not in ancestors
+
+
+def test_every_n_pages_comes_back_with_the_folder_and_cuts_the_scan(tmp_path) -> None:  # noqa: ANN001
+    from textual.widgets import RadioButton
+
+    from opengrader.core.pipeline_settings import FolderPipelineSettings, save_folder_settings
+
+    folder = _pipe_class_folder(tmp_path)
+    save_folder_settings(folder, FolderPipelineSettings(pages_per_submission=6, fixed_split=True))
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+            return (
+                app.query_one("#pipe-split-fixed", RadioButton).value,
+                app.query_one("#pipe-split-auto", RadioButton).value,
+                str(app.query_one("#pipe-split-hint", Static).render()),
+                screen._build_pipeline_request(),
+            )
+
+    fixed, auto, hint, request = asyncio.run(run())
+    assert fixed and not auto
+    assert "cut every N pages" in hint
+    assert request is not None and request.fixed_split and request.pages_per_submission == 6
+
+
+def test_every_n_pages_without_a_page_count_is_refused(tmp_path) -> None:  # noqa: ANN001
+    from textual.widgets import RadioButton
+
+    folder = _pipe_class_folder(tmp_path)
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        notices: list[str] = []
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+            app.query_one("#pipe-pages", Input).value = ""
+            app.query_one("#pipe-split-fixed", RadioButton).value = True
+            await pilot.pause()
+            app.notify = lambda message, **_kwargs: notices.append(str(message))  # type: ignore[method-assign]
+            return screen._build_pipeline_request(), notices
+
+    request, notices = asyncio.run(run())
+    assert request is None
+    assert any("cut the scan every N pages" in notice for notice in notices)
+
+
+def test_a_blank_page_count_stands_for_the_templates_length(tmp_path) -> None:  # noqa: ANN001
+    import fitz
+    from textual.widgets import RadioButton
+
+    folder = _pipe_class_folder(tmp_path)
+    doc = fitz.open()
+    for _ in range(3):
+        doc.new_page()
+    doc.save(str(folder / "blank-template.pdf"))
+    doc.close()
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+            placeholder = app.query_one("#pipe-pages", Input).placeholder
+            app.query_one("#pipe-pages", Input).value = ""
+            app.query_one("#pipe-split-fixed", RadioButton).value = True
+            await pilot.pause()
+            return placeholder, screen._build_pipeline_request()
+
+    placeholder, request = asyncio.run(run())
+    assert placeholder == "3 — the template's length"
+    assert request is not None and request.fixed_split and request.pages_per_submission is None

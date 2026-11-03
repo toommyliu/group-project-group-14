@@ -15,6 +15,8 @@ from textual.widgets import (
     Checkbox,
     Input,
     ProgressBar,
+    RadioButton,
+    RadioSet,
     Static,
     TextArea,
     Collapsible,
@@ -37,7 +39,10 @@ from opengrader.core.pipeline import (
     StageOutcome,
     StageStatus,
     auto_grade_pending,
+    describe_uneven_scan,
     plan_pipeline,
+    split_page_count,
+    uneven_scans,
     refine_argv,
     section_requests,
     run_pipeline,
@@ -46,6 +51,7 @@ from opengrader.core.pipeline_settings import (
     FolderPipelineSettings,
     load_folder_settings,
     load_machine_settings,
+    load_split_choice,
     save_folder_settings,
     save_machine_settings,
 )
@@ -136,6 +142,21 @@ _PIPE_STAGE_LABELS = {
 }
 
 # Names tried, in order, for an answer key Create answer key is about to write.
+# Under "How to split the scan", keyed by whether it is cut every N pages.
+_SPLIT_HINTS = {
+    True: (
+        "The scan is cut every N pages (left blank: the blank template's "
+        "length), then checked: a page count that isn't a whole number of "
+        "papers, or pages out of order, is reported before anything is read."
+    ),
+    False: (
+        "Each paper is found by its printed page numbers, so papers may differ "
+        "in length. Pages per submission (left blank: the blank template's "
+        "length) only checks the result, and is where the scan is cut if the "
+        "page numbers can't be read."
+    ),
+}
+
 _NEW_ANSWER_KEY_NAMES = ("qa.md", "answer-key.md", "solutions.md")
 
 
@@ -595,27 +616,31 @@ class SetupScreen(OutlineButtons, Vertical):
                         classes="card-hint hidden",
                     )
 
+                    # How the scan is cut sits on the card itself, never under
+                    # Settings: a page count typed without seeing this choice
+                    # was taken to cut the scan, and it did not.
+                    yield self._field_label(
+                        "How to split the scan", "into one PDF per student"
+                    )
+                    with RadioSet(id="pipe-split-method"):
+                        yield RadioButton(
+                            "Every N pages — every paper has the same number of pages",
+                            id="pipe-split-fixed",
+                        )
+                        yield RadioButton(
+                            "Find where each paper starts — from the printed page numbers",
+                            value=True,
+                            id="pipe-split-auto",
+                        )
+                    yield self._field_label("Pages per submission", "N")
+                    yield Input(placeholder="e.g. 6", id="pipe-pages")
+                    yield Static(_SPLIT_HINTS[False], id="pipe-split-hint", classes="card-hint")
+
                     with Collapsible(
-                        title="Settings — pages, roster, template, how it runs",
+                        title="Settings — roster, template, how it runs",
                         id="pipe-settings",
                         collapsed=True,
                     ):
-                        yield self._field_label(
-                            "Pages per submission", "leave blank to auto-detect"
-                        )
-                        yield Input(
-                            placeholder="e.g. 6", id="pipe-pages"
-                        )
-                        yield Static(
-                            "This is also what lets the scan pre-flight catch a "
-                            "wrong page count or a swapped pair before anything is "
-                            "graded — without it, that check can't run at all.",
-                            classes="card-hint",
-                        )
-                        yield Checkbox(
-                            "Split strictly every that many pages", id="pipe-fixed-split"
-                        )
-
                         yield Checkbox(
                             "Match student names against a roster", id="pipe-use-roster"
                         )
@@ -1609,6 +1634,7 @@ class SetupScreen(OutlineButtons, Vertical):
         elif event.checkbox.id == "pipe-use-roster":
             self.query_one("#pipe-roster-row").set_class(not event.value, "hidden")
         elif event.checkbox.id == "pipe-use-template":
+            self._refresh_pages_placeholder()
             # The box as it is now, not as it was when this was posted: a
             # folder scan ticks it and the saved settings may untick it again
             # before either message arrives, and the first must not then
@@ -2424,6 +2450,12 @@ class SetupScreen(OutlineButtons, Vertical):
         saved = load_folder_settings(folder)
         if saved is not None:
             self._apply_folder_settings(saved)
+        else:
+            # `opengrader run` may have asked how to split, and nothing else.
+            choice = load_split_choice(folder)
+            if choice is not None:
+                self._set_fixed_split(choice)
+        self._refresh_pages_placeholder()
 
     def _apply_folder_settings(self, saved: FolderPipelineSettings) -> None:
         def fill(input_id: str, value: str) -> None:
@@ -2459,9 +2491,51 @@ class SetupScreen(OutlineButtons, Vertical):
                 f"{entry}\n" for entry in saved.section_scans
             )
         tick("pipe-many-scans", saved.use_section_scans)
-        tick("pipe-fixed-split", saved.fixed_split)
+        self._set_fixed_split(saved.fixed_split)
         tick("pipe-reorder", saved.reorder_pages)
         tick("pipe-draft-rubrics", saved.draft_rubrics)
+
+    def _template_pages(self) -> int | None:
+        """The ticked blank template's page count: one submission's length,
+        so what a blank Pages per submission stands for. None without one."""
+        if not self.query_one("#pipe-use-template", Checkbox).value:
+            return None
+        path = self._clean_path(self.query_one("#pipe-template", Input).value)
+        if not path or not Path(path).is_file():
+            return None
+        try:
+            from pypdf import PdfReader
+
+            return len(PdfReader(path).pages) or None
+        except Exception:  # noqa: BLE001 - an unreadable template says nothing
+            return None
+
+    def _refresh_pages_placeholder(self) -> None:
+        pages = self._template_pages()
+        self.query_one("#pipe-pages", Input).placeholder = (
+            f"{pages} — the template's length" if pages else "e.g. 6"
+        )
+
+    @on(Input.Changed, "#pipe-template")
+    def _on_pipe_template_changed(self) -> None:
+        self._refresh_pages_placeholder()
+
+    def _fixed_split(self) -> bool:
+        """Whether "How to split the scan" says to cut every N pages."""
+        return self.query_one("#pipe-split-fixed", RadioButton).value
+
+    def _set_fixed_split(self, fixed: bool) -> None:
+        # Press only the chosen one: the RadioSet lets go of the other itself,
+        # and setting both races it.
+        chosen = "#pipe-split-fixed" if fixed else "#pipe-split-auto"
+        self.query_one(chosen, RadioButton).value = True
+        self.query_one("#pipe-split-hint", Static).update(_SPLIT_HINTS[fixed])
+
+    @on(RadioSet.Changed, "#pipe-split-method")
+    def _on_split_method_changed(self, event: RadioSet.Changed) -> None:
+        self.query_one("#pipe-split-hint", Static).update(
+            _SPLIT_HINTS[event.pressed.id == "pipe-split-fixed"]
+        )
 
     def _folder_settings(self) -> FolderPipelineSettings:
         """The card as it stands, in the shape that is saved with the folder."""
@@ -2505,7 +2579,7 @@ class SetupScreen(OutlineButtons, Vertical):
             section_scans=tuple(
                 line.strip() for line in raw_scans.splitlines() if line.strip()
             ),
-            fixed_split=ticked("pipe-fixed-split"),
+            fixed_split=self._fixed_split(),
             reorder_pages=ticked("pipe-reorder"),
             draft_rubrics=ticked("pipe-draft-rubrics"),
         )
@@ -3531,7 +3605,12 @@ class SetupScreen(OutlineButtons, Vertical):
             else:
                 lines.append(f"· {label:<15} not used")
         pages = self.query_one("#pipe-pages", Input).value.strip()
-        lines.append(f"  {'pages each':<15} {pages or 'worked out from the scan'}")
+        count = pages or str(self._template_pages() or "")
+        origin = "" if pages or not count else " (the template's length)"
+        if self._fixed_split() and count:
+            lines.append(f"  {'split':<15} every {count} pages{origin}")
+        else:
+            lines.append(f"  {'pages each':<15} {count + origin if count else 'worked out from the scan'}")
         lines.append(
             "Settings: the ones saved with this folder."
             if load_folder_settings(folder) is not None
@@ -3786,10 +3865,11 @@ class SetupScreen(OutlineButtons, Vertical):
                 )
                 return None
             pages = int(pages_str)
-        fixed_split = self.query_one("#pipe-fixed-split", Checkbox).value
-        if fixed_split and pages is None:
+        fixed_split = self._fixed_split()
+        if fixed_split and pages is None and self._template_pages() is None:
             self.app.notify(
-                "Fill in Pages per submission to split strictly by page count.",
+                "Fill in Pages per submission (or align with a blank template) "
+                "to cut the scan every N pages.",
                 severity="error",
             )
             return None
@@ -3887,6 +3967,15 @@ class SetupScreen(OutlineButtons, Vertical):
                 # The reason was just notified; the fields it names are here.
                 self._show_pipeline_card()
             return
+
+        if offer_draft:
+            # Said, not refused: the pre-flight and split review check the cut too.
+            for scan, count in uneven_scans(request):
+                self.app.notify(
+                    describe_uneven_scan(scan, count, split_page_count(request)[0] or 1),
+                    severity="warning",
+                    timeout=15,
+                )
 
         if offer_draft and request.qa_file is None and request.blank_template is not None:
             draft = self._draft_key(request.output_dir)

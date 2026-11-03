@@ -479,7 +479,7 @@ def _page_order_issues(plan: PageOrderPlan) -> list[ScanIssue]:
     if plan.evidence == "exact":
         remedy = (
             "these page numbers are exact (QR code or PDF text layer), so "
-            "splitting with --fix-order will put them back in order"
+            "splitting with --split every-n puts them back in order by itself"
         )
     else:
         remedy = (

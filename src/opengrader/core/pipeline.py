@@ -352,6 +352,92 @@ def section_slug(section: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", section.strip().lower()).strip("-") or "section"
 
 
+def split_page_count(request: PipelineRequest) -> tuple[int | None, str]:
+    """Pages per submission for cutting the scan, and where it came from:
+    "given", "template" (a blank template is one submission long), or ""
+    with None when neither says. Already-split PDFs have no scan to cut."""
+    if request.pages_per_submission:
+        return request.pages_per_submission, "given"
+    bundle = bool(request.section_scans) or not request.input_is_split
+    if bundle and request.blank_template is not None:
+        try:
+            return _template_page_count(request.blank_template), "template"
+        except Exception:  # noqa: BLE001 - an unreadable template says nothing
+            pass
+    return None, ""
+
+
+def _scan_page_counts(request: PipelineRequest) -> list[tuple[Path, int]]:
+    """Each scanned bundle with its page count; ones that can't be read are left out."""
+    if request.section_scans:
+        scans = [path for path, _name in map(parse_roster_arg, request.section_scans)]
+    else:
+        scans = [request.scan]
+    from pypdf import PdfReader
+
+    counts: list[tuple[Path, int]] = []
+    for scan in scans:
+        if scan.suffix.lower() != ".pdf" or not scan.is_file():
+            continue
+        try:
+            counts.append((scan, len(PdfReader(str(scan)).pages)))
+        except Exception:  # noqa: BLE001 - the split stage reports a bad PDF itself
+            continue
+    return counts
+
+
+def uneven_scans(request: PipelineRequest) -> list[tuple[Path, int]]:
+    """Scans cut every N pages whose page count is not a whole number of
+    papers, with that count. One sheet missing or extra shifts every cut after
+    it, so this is said before the run, never silently cut. Empty when the
+    scan is not cut every N pages, or a count can't be read."""
+    pages, _source = split_page_count(request)
+    if not request.fixed_split or not pages:
+        return []
+    return [(scan, count) for scan, count in _scan_page_counts(request) if count % pages]
+
+
+@dataclass(frozen=True)
+class SplitQuestion:
+    """Whether to cut the scan every N pages, for a run where nobody chose."""
+
+    pages: int
+    # "given" or "template": where `pages` came from.
+    source: str
+    scans: tuple[tuple[Path, int], ...]
+
+    @property
+    def even(self) -> bool:
+        return all(count % self.pages == 0 for _scan, count in self.scans)
+
+
+def split_question(request: PipelineRequest) -> SplitQuestion | None:
+    """What to put to a person before the scan is split, or None when there is
+    nothing to ask: it is already cut every N pages, there is no page count,
+    no scan to cut, or the split is already done and would be reused (a
+    different answer would cut it again)."""
+    if request.fixed_split:
+        return None
+    pages, source = split_page_count(request)
+    if not pages:
+        return None
+    scans = _scan_page_counts(request)
+    if not scans:
+        return None
+    if not any(plan.stage == STAGE_SPLIT and plan.will_run for plan in plan_pipeline(request)):
+        return None
+    return SplitQuestion(pages=pages, source=source, scans=tuple(scans))
+
+
+def describe_uneven_scan(scan: Path, count: int, pages: int) -> str:
+    return (
+        f"{scan.name} has {count} pages: {count // pages} papers of {pages} pages "
+        f"and {count % pages} left over. A paper with a missing or extra sheet "
+        "shifts every cut after it. Check the scan, or choose \"Find where each "
+        "paper starts\"."
+    )
+
+
 def section_requests(request: PipelineRequest) -> tuple[PipelineRequest, ...]:
     """One request per section scan, or () for a single-stack run.
 
@@ -551,14 +637,14 @@ def _split_argv(request: PipelineRequest) -> tuple[str, ...]:
         str(request.scan),
         "--output",
         str(request.split_dir),
-        "--fix-rotation",
-        "--fix-order",
         "--extra-work-pages",
     ]
     if request.pages_per_submission:
         argv += ["--pages-per-submission", str(request.pages_per_submission)]
     if request.fixed_split:
-        argv.append("--fixed")
+        # Cutting every N pages checks the scan, turns it upright and puts
+        # trustworthy page order right by itself; page matching does its own.
+        argv += ["--split", "every-n"]
     if request.blank_template is not None:
         argv += ["--blank-template", str(request.blank_template)]
     if request.reorder_pages:
@@ -712,6 +798,8 @@ def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
         settings = {
             "pages_per_submission": request.pages_per_submission,
             "blank_template": template,
+            # No longer flags (an every-N cut always does both), but kept so a
+            # split recorded before that still matches and is not cut again.
             "fix_rotation": True,
             "fix_order": True,
             "extra_work_pages": True,

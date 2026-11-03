@@ -26,9 +26,13 @@ from opengrader.core.pipeline import (
     PipelineRequest,
     StageOutcome,
     StageStatus,
+    describe_uneven_scan,
     plan_pipeline,
     run_pipeline,
     section_requests,
+    split_page_count,
+    split_question,
+    uneven_scans,
 )
 
 # The first line of a pause's detail says which question it is; it is for
@@ -181,7 +185,68 @@ def _print_plan(request: PipelineRequest) -> None:
             print(f"  {'':<12} {'':<8} $ {plan.command}")
         elif plan.will_run:
             print(f"  {'':<12} {'':<8} (in process — core/submissions/scan_check.py)")
+    pages, source = split_page_count(request)
+    if request.section_scans or not request.input_is_split:
+        method = f"every {pages} pages" if request.fixed_split else "find where each paper starts"
+        origin = " (the blank template's length)" if source == "template" else ""
+        count = f"; {pages} pages each{origin}" if pages else ""
+        print(f"\n  split:         {method}{count}")
     print(f"\n  cohort folder: {request.output_dir}")
+
+
+def _ask_split_method(
+    request: PipelineRequest, folder: Path, *, as_json: bool
+) -> PipelineRequest:
+    """Nobody chose how this folder's scan is split. In a terminal, ask once,
+    showing the page arithmetic, and remember the answer for the folder; a run
+    nobody can answer finds where each paper starts, the page count (or the
+    template's length) checking the result."""
+    from opengrader.core.pipeline_settings import save_split_choice
+
+    if not (sys.stdin.isatty() and not as_json):
+        return request
+    question = split_question(request)
+    if question is None:
+        return request
+    pages = question.pages
+    stream = sys.stdout
+    stream.write("\nHow should the scan be split into one PDF per student?\n")
+    for scan, count in question.scans:
+        papers = f"{count // pages} papers of {pages}"
+        left = count % pages
+        stream.write(f"  {scan.name}: {count} pages = {papers}" + (f" and {left} left over\n" if left else "\n"))
+    if question.source == "template":
+        stream.write(f"  ({pages} pages each is the length of the blank template.)\n")
+    if not question.even:
+        stream.write(
+            f"  That isn't a whole number of papers: a sheet is missing or extra somewhere,\n"
+            f"  and cutting every {pages} pages would shift every paper after it. Finding\n"
+            "  where each paper starts instead.\n"
+        )
+        stream.flush()
+        return request
+    stream.write(
+        f"  Yes: cut every {pages} pages. Right when every paper was scanned whole and in order.\n"
+        "  No:  find where each paper starts. For blank backs, scratch sheets or missing pages.\n"
+    )
+    stream.flush()
+    try:
+        answer = input(f"Cut the scan every {pages} pages? [Y/n] ").strip().lower()
+    except EOFError:
+        return request
+    if answer in ("", "y", "yes"):
+        fixed = True
+    elif answer in ("n", "no"):
+        fixed = False
+    else:
+        return request
+    try:
+        save_split_choice(folder, fixed)
+        stream.write("Remembered for this folder (--split every-n / find-starts answers it up front).\n")
+    except OSError:
+        pass
+    stream.flush()
+    return replace(request, fixed_split=fixed)
 
 
 def _print_egress_summary(report: PipelineReport) -> None:
@@ -858,12 +923,15 @@ def _save_inputs(
     ),
 )
 @click.option(
-    "--fixed",
-    "fixed_split",
-    is_flag=True,
+    "--split",
+    "split_method",
+    type=click.Choice(["every-n", "find-starts"]),
     help=(
-        "Split the scan every --pages-per-submission pages instead of matching "
-        "pages to find where each student starts."
+        "How to split the scan: every-n cuts every --pages-per-submission pages "
+        "(or the blank template's length); find-starts finds where each paper "
+        "starts from its printed page numbers. Without it a terminal run asks "
+        "once per class folder, when a page count is known, and remembers the "
+        "answer; otherwise papers are found by their page numbers."
     ),
 )
 @click.option(
@@ -1043,7 +1111,7 @@ def command(
     section_rosters: tuple[str, ...],
     blank_template: str | None,
     pages_per_submission: int | None,
-    fixed_split: bool,
+    split_method: str | None,
     jobs: int | None,
     llm: bool | None,
     llm_vision_model: str,
@@ -1101,8 +1169,21 @@ def command(
         folder = str(target)
     _resolve_class_folder(folder, inputs, stream=sys.stderr if as_json else sys.stdout)
 
-    if fixed_split and not inputs.pages_per_submission:
-        raise click.UsageError("--fixed needs --pages-per-submission.")
+    if split_method == "every-n":
+        chosen: bool | None = True
+    elif split_method == "find-starts":
+        chosen = False
+    else:
+        from opengrader.core.pipeline_settings import load_split_choice
+
+        chosen = load_split_choice(target)
+        if chosen and not (inputs.pages_per_submission or inputs.blank_template):
+            # Remembered from a run that had a page count; this one has none.
+            chosen = None
+    if chosen and not (inputs.pages_per_submission or inputs.blank_template):
+        raise click.UsageError(
+            "Cutting every N pages needs --pages-per-submission (or a blank template to take it from)."
+        )
 
     ai = resolved_ai()
     request = PipelineRequest(
@@ -1114,7 +1195,7 @@ def command(
         section_scans=inputs.section_scans,
         blank_template=Path(inputs.blank_template) if inputs.blank_template else None,
         pages_per_submission=inputs.pages_per_submission,
-        fixed_split=fixed_split,
+        fixed_split=bool(chosen),
         reorder_pages=reorder_pages,
         keep_page_order=keep_page_order,
         fix_split=fix_split,
@@ -1152,6 +1233,14 @@ def command(
         )
     except (OSError, ValueError) as exc:
         raise click.UsageError(str(exc)) from None
+
+    if chosen is None:
+        request = _ask_split_method(request, target, as_json=as_json)
+    for scan, count in uneven_scans(request):
+        print(
+            f"Warning: {describe_uneven_scan(scan, count, split_page_count(request)[0] or 1)}",
+            file=sys.stderr,
+        )
 
     narrator = _Narrator(stream=sys.stderr if as_json else sys.stdout)
     report = _run_pipeline(request, narrator, as_json=as_json)

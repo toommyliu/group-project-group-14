@@ -29,6 +29,9 @@ from opengrader.core.pipeline import (
     PipelineRequest,
     StagePlan,
     StageStatus,
+    describe_uneven_scan,
+    split_page_count,
+    uneven_scans,
 )
 
 __all__ = ["PlanPreview", "PreviewStep", "describe_plan", "technical_lines"]
@@ -215,8 +218,10 @@ def _fixes(request: PipelineRequest, plans: Sequence[StagePlan]) -> list[str]:
     ):
         fixes.append(
             "Pages per submission is blank, so the scan check cannot catch a "
-            "missing or swapped page. Fill it in under Settings if you know it."
+            "missing or swapped page. Fill it in if you know it."
         )
+    for scan, count in uneven_scans(request):
+        fixes.append(describe_uneven_scan(scan, count, split_page_count(request)[0] or 1))
     return fixes
 
 

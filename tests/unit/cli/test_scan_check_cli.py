@@ -197,7 +197,7 @@ def test_out_of_order_pages_are_reported_with_their_remedy(
     )
     out = capsys.readouterr().out
     assert "out of order" in out
-    assert "--fix-order" in out
+    assert "--split every-n" in out
 
 
 def test_page_order_says_when_it_could_not_run(tmp_path, upright, capsys) -> None:

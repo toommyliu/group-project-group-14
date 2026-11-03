@@ -24,7 +24,6 @@ _IDENTITY_OPS = [
     pytest.param("extract_field_text", {"field_kind": "name"}, id="name"),
     pytest.param("extract_field_text", {"field_kind": "sid"}, id="sid"),
     pytest.param("extract_title_metadata", {}, id="title"),
-    pytest.param("page_has_identity_field", {}, id="identity-page"),
     # reorder.py sends whole pages — page 1 (the cover) among them.
     pytest.param("extract_page_number", {}, id="page-number"),
 ]
@@ -40,7 +39,6 @@ _WORK_OPS = [
 _LOCAL_SUCCESS = {
     "extract_field_text": lambda **_kwargs: "Grace Hopper",
     "extract_title_metadata": lambda **_kwargs: TitleMetadataResult(None, "HW1", None, "HW1"),
-    "page_has_identity_field": lambda **_kwargs: True,
     "extract_page_number": lambda **_kwargs: 1,
 }
 
@@ -189,10 +187,9 @@ def test_extract_field_text_disallowed_on_cloud_never_builds_the_local_route(
     assert inner.calls == []
 
 
-@pytest.mark.parametrize("method, kwargs", _IDENTITY_OPS[2:])  # title, page, page-number
+@pytest.mark.parametrize("method, kwargs", _IDENTITY_OPS[2:])  # title, page-number
 def test_other_identity_ops_are_unaffected_by_read_identity_locally(method, kwargs) -> None:
-    """extract_title_metadata, page_has_identity_field and extract_page_number
-    never return a name or ID, so read_identity_locally=False leaves them alone."""
+    """extract_title_metadata and extract_page_number never return a name or ID, so read_identity_locally=False leaves them alone."""
     guard, inner = _guard(cloud=False, identity_reads_allowed=False)
     getattr(guard, method)(image_path=Path("x.png"), **kwargs)
     assert inner.calls == [method]

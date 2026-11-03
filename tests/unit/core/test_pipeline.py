@@ -169,8 +169,6 @@ def test_split_argv_always_fixes_rotation_and_order(tmp_path) -> None:
         str(request.scan),
         "--output",
         str(tmp_path / "cohort" / "student-pdfs"),
-        "--fix-rotation",
-        "--fix-order",
         "--extra-work-pages",
         "--pages-per-submission",
         "6",
@@ -1214,3 +1212,62 @@ def test_the_answer_key_is_not_handed_over_where_something_else_finds_the_questi
 
     assert "--qa-file" in plain.argv
     assert "--qa-file" not in with_template.argv
+
+
+def _pages_pdf(path, count: int):  # noqa: ANN001, ANN202
+    import fitz
+
+    doc = fitz.open()
+    for _ in range(count):
+        doc.new_page()
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_a_scan_cut_every_n_pages_that_leaves_pages_over_is_pointed_out(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline import PipelineRequest, describe_uneven_scan, uneven_scans
+
+    scan = _pages_pdf(tmp_path / "scans.pdf", 7)
+    request = PipelineRequest(scan=scan, output_dir=tmp_path, pages_per_submission=3, fixed_split=True)
+
+    assert uneven_scans(request) == [(scan, 7)]
+    assert "2 papers of 3 pages and 1 left over" in describe_uneven_scan(scan, 7, 3)
+
+
+def test_an_even_scan_or_one_split_by_page_numbers_is_not_pointed_out(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline import PipelineRequest, uneven_scans
+
+    even = _pages_pdf(tmp_path / "even.pdf", 6)
+    odd = _pages_pdf(tmp_path / "odd.pdf", 7)
+
+    assert uneven_scans(PipelineRequest(scan=even, output_dir=tmp_path, pages_per_submission=3, fixed_split=True)) == []
+    assert uneven_scans(PipelineRequest(scan=odd, output_dir=tmp_path, pages_per_submission=3)) == []
+
+
+def test_a_blank_template_gives_the_page_count_when_none_is_given(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline import PipelineRequest, split_page_count
+
+    template = _pages_pdf(tmp_path / "blank.pdf", 3)
+    scan = _pages_pdf(tmp_path / "scans.pdf", 9)
+
+    assert split_page_count(PipelineRequest(scan=scan, output_dir=tmp_path, blank_template=template)) == (3, "template")
+    assert split_page_count(
+        PipelineRequest(scan=scan, output_dir=tmp_path, blank_template=template, pages_per_submission=4)
+    ) == (4, "given")
+    assert split_page_count(PipelineRequest(scan=scan, output_dir=tmp_path)) == (None, "")
+
+
+def test_the_split_question_shows_whether_the_scan_divides_evenly(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline import PipelineRequest, split_question
+
+    template = _pages_pdf(tmp_path / "blank.pdf", 3)
+    even = PipelineRequest(scan=_pages_pdf(tmp_path / "even.pdf", 9), output_dir=tmp_path / "a", blank_template=template)
+    odd = PipelineRequest(scan=_pages_pdf(tmp_path / "odd.pdf", 10), output_dir=tmp_path / "b", blank_template=template)
+
+    question = split_question(even)
+    assert question is not None and question.pages == 3 and question.source == "template" and question.even
+    assert split_question(odd) is not None and not split_question(odd).even
+    # Already cut every N pages, or nothing says how long a paper is: nothing to ask.
+    assert split_question(replace(even, fixed_split=True)) is None
+    assert split_question(replace(even, blank_template=None)) is None

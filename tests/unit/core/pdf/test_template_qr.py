@@ -9,10 +9,6 @@ from opengrader.core.pdf.templates import (
 )
 from opengrader.core.pdf_utils import render_page_to_image
 from opengrader.core.roster import RosterStudent
-from opengrader.core.submissions.boundary import (
-    boundaries_from_qr_pages,
-    plan_boundary_ranges,
-)
 from opengrader.core.submissions.reorder import reorder_pdf_pages
 
 QUESTIONS = [
@@ -70,36 +66,6 @@ def test_personalized_batch_master_key_first_then_per_student(tmp_path) -> None:
     student_codes = [c for c in codes[1:] if c is not None]
     assert {c.student_id for c in student_codes} == ids
     assert all(c.version == "A" and c.page == 1 for c in student_codes)
-
-
-def test_boundary_detection_splits_qr_bundle(tmp_path) -> None:
-    out = tmp_path / "batch.pdf"
-    students = [
-        RosterStudent(student_id="100001", name="Alice Zhang"),
-        RosterStudent(student_id="100002", name="Bob Young"),
-        RosterStudent(student_id="100003", name="Carol Xavier"),
-    ]
-    generate_personalized_batch(out, students, "A", QUESTIONS, "Quiz 1")
-
-    src = fitz.open(str(out))
-    bundle_path = tmp_path / "bundle.pdf"
-    bundle = fitz.open()
-    bundle.insert_pdf(src, from_page=1)
-    bundle.save(str(bundle_path))
-    bundle.close()
-    src.close()
-
-    ranges, _warnings = plan_boundary_ranges(bundle_path)
-    assert [(r.start_page, r.end_page) for r in ranges] == [(1, 1), (2, 2), (3, 3)]
-
-
-def test_boundaries_from_qr_pages_needs_every_page() -> None:
-    exact = boundaries_from_qr_pages([1, 1, 1])
-    assert exact is not None and exact.ranges == [(0, 0), (1, 1), (2, 2)]
-    grouped = boundaries_from_qr_pages([1, 2, 3, 1, 2])
-    assert grouped is not None and grouped.ranges == [(0, 2), (3, 4)]
-    assert boundaries_from_qr_pages([1, None, 1]) is None
-    assert boundaries_from_qr_pages([]) is None
 
 
 def test_reorder_uses_qr_page_numbers(tmp_path) -> None:
