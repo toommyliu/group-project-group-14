@@ -742,3 +742,43 @@ def test_discovery_takes_a_file_or_a_flat_directory(tmp_path: Path) -> None:
 
     assert discover_scan_pdfs(tmp_path / "a.pdf") == [tmp_path / "a.pdf"]
     assert discover_scan_pdfs(tmp_path) == [tmp_path / "a.pdf", tmp_path / "b.pdf"]
+
+
+def test_the_same_scan_is_checked_once_per_process(tmp_path: Path, monkeypatch) -> None:
+    # A pipeline run checked every page in scan-check, then again in the
+    # splitter's pre-flight (2026-11-05: 12 pages rendered and OCR'd twice).
+    from opengrader.core import pdf_utils
+
+    renders = []
+    real_render = pdf_utils.render_page_to_image
+    monkeypatch.setattr(
+        pdf_utils,
+        "render_page_to_image",
+        lambda *a, **k: renders.append(1) or real_render(*a, **k),
+    )
+    scan = _pdf(tmp_path / "scan.pdf", pages=3)
+    messages: list[str] = []
+
+    first = analyze_scan_pdf(scan, check_orientation=False, pages_per_submission=3)
+    second = analyze_scan_pdf(
+        scan,
+        check_orientation=False,
+        pages_per_submission=3,
+        progress_callback=messages.append,
+    )
+
+    assert second is first
+    assert len(renders) == 3
+    assert messages == ["Scan already checked in this run (3 pages)"]
+
+
+def test_a_scan_is_checked_again_when_its_bytes_or_settings_change(tmp_path: Path) -> None:
+    scan = _pdf(tmp_path / "scan.pdf", pages=2)
+    first = analyze_scan_pdf(scan, check_orientation=False)
+
+    other_settings = analyze_scan_pdf(scan, check_orientation=False, pages_per_submission=2)
+    _pdf(scan, pages=3)  # replaced in place, same name
+    replaced = analyze_scan_pdf(scan, check_orientation=False)
+
+    assert other_settings is not first
+    assert replaced.page_count == 3

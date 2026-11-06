@@ -85,7 +85,9 @@ function CsvExample() {
           <span className="size-3 border" />
           Optional
         </span>
-        <span className="ms-auto">Other columns are ignored.</span>
+        <span className="ms-auto">
+          Other columns are ignored. A Canvas gradebook export works as it is.
+        </span>
       </div>
     </div>
   );

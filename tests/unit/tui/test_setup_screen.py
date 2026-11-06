@@ -1,4 +1,7 @@
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 
 from textual.containers import VerticalScroll
 from textual.widgets import Button, Checkbox, Collapsible, Input, Static
@@ -1309,7 +1312,6 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
             host="http://192.168.1.50:9999",
             read_handwriting=True,
             grade_written=True,
-            auto_grade=False,
         )
     )
 
@@ -1340,6 +1342,7 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
             app.query_one("#pipe-pages", Input).value = "6"
             app.query_one("#pipe-force", Checkbox).value = True
             app.query_one("#pipe-draft-rubrics", Checkbox).value = True
+            app.query_one("#pipe-auto-grade", Checkbox).value = True
 
             return screen._build_pipeline_request()
 
@@ -1359,7 +1362,7 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
     assert request.llm.vision_model == ""
     assert request.llm.text_model == ""
     assert request.llm.host == "http://192.168.1.50:9999"
-    assert request.auto_grade is False
+    assert request.auto_grade is True
 
 
 def test_pipeline_request_defaults_when_every_disclosure_is_off(tmp_path) -> None:  # noqa: ANN001
@@ -1384,12 +1387,12 @@ def test_pipeline_request_defaults_when_every_disclosure_is_off(tmp_path) -> Non
     resolved = app_config.resolve()
     assert resolved.read_handwriting is False
     assert resolved.grade_written is False
-    assert resolved.auto_grade is True
     assert request.llm.read_handwriting == resolved.read_handwriting
     assert request.llm.grade_written == resolved.grade_written
     assert request.llm.enabled is False
     assert request.llm.host == resolved.host
-    assert request.auto_grade == resolved.auto_grade
+    # Opt-in: off until "Auto-grade after reading the scans" is ticked.
+    assert request.auto_grade is False
 
 
 def test_pipeline_request_llm_options_follow_the_two_ai_jobs_independently(
@@ -1660,7 +1663,7 @@ def test_pipeline_ok_report_with_submissions_opens_the_grading_workspace(
             app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
             app.query_one("#pipe-out", Input).value = str(out_dir)
             app.query_one("#pipe-qa", Input).value = str(qa)
-            app.query_one("#pipe-grade-asap", Checkbox).value = False
+            screen._grade_as_ready = False
             screen._run_pipeline()
             await app.workers.wait_for_complete()
             await pilot.pause()
@@ -1791,7 +1794,8 @@ def test_running_remembers_the_settings_but_never_the_one_shot_overrides(
             app.query_one("#pipe-pages", Input).value = "6"
             app.query_one("#pipe-use-roster", Checkbox).value = False
             app.query_one("#pipe-reorder", Checkbox).value = True
-            app.query_one("#pipe-grade-asap", Checkbox).value = False
+            screen._grade_as_ready = False
+            app.query_one("#pipe-auto-grade", Checkbox).value = True
             app.query_one("#pipe-parallel", Checkbox).value = True
             app.query_one("#pipe-jobs", Input).value = "3"
             app.query_one("#pipe-force", Checkbox).value = True
@@ -1817,6 +1821,8 @@ def test_running_remembers_the_settings_but_never_the_one_shot_overrides(
 
     machine = load_machine_settings()
     assert machine.grade_as_ready is False
+    # Ticked once, kept for every folder on this computer.
+    assert machine.auto_grade is True
     assert machine.jobs == 3
     assert machine.last_class_folder == str(folder)
 
@@ -1925,11 +1931,14 @@ def test_the_app_opens_on_the_class_folder_and_preferences_used_last(tmp_path) -
     save_folder_settings(folder, FolderPipelineSettings(pages_per_submission=6))
     save_machine_settings(
         MachinePipelineSettings(
-            grade_as_ready=False, jobs=3, last_class_folder=str(folder)
+            grade_as_ready=False,
+            auto_grade=True,
+            jobs=3,
+            last_class_folder=str(folder),
         )
     )
 
-    async def run() -> tuple[str, str, str, bool, bool, str]:
+    async def run() -> tuple[str, str, str, bool, bool, bool, str]:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -1937,7 +1946,8 @@ def test_the_app_opens_on_the_class_folder_and_preferences_used_last(tmp_path) -
                 app.query_one("#pipe-out", Input).value,
                 app.query_one("#pipe-scan", Input).value,
                 app.query_one("#pipe-pages", Input).value,
-                app.query_one("#pipe-grade-asap", Checkbox).value,
+                app.query_one(SetupScreen)._remembered_grade_as_ready(),
+                app.query_one("#pipe-auto-grade", Checkbox).value,
                 app.query_one("#pipe-parallel", Checkbox).value,
                 app.query_one("#pipe-jobs", Input).value,
             )
@@ -1947,6 +1957,7 @@ def test_the_app_opens_on_the_class_folder_and_preferences_used_last(tmp_path) -
         str(folder / "scans.pdf"),
         "6",
         False,
+        True,
         True,
         "3",
     )
@@ -2427,3 +2438,424 @@ def test_a_blank_page_count_stands_for_the_templates_length(tmp_path) -> None:  
     placeholder, request = asyncio.run(run())
     assert placeholder == "3 — the template's length"
     assert request is not None and request.fixed_split and request.pages_per_submission is None
+
+
+def _split_after_loading(folder):  # noqa: ANN001, ANN202
+    from textual.widgets import RadioButton
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+            return app.query_one("#pipe-split-fixed", RadioButton).value
+
+    return asyncio.run(run())
+
+
+def test_a_folder_with_a_blank_template_defaults_to_every_n_pages(tmp_path) -> None:  # noqa: ANN001
+    import fitz
+
+    folder = _pipe_class_folder(tmp_path)
+    doc = fitz.open()
+    for _ in range(3):
+        doc.new_page()
+    doc.save(str(folder / "blank-template.pdf"))
+    doc.close()
+    assert _split_after_loading(folder) is True
+
+
+def test_an_unreadable_template_keeps_finding_where_each_paper_starts(tmp_path) -> None:  # noqa: ANN001
+    # Its length is unknown, so "every N pages" would have no N.
+    assert _split_after_loading(_pipe_class_folder(tmp_path)) is False
+
+
+def test_a_folder_without_a_template_finds_where_each_paper_starts(tmp_path) -> None:  # noqa: ANN001
+    folder = _pipe_class_folder(tmp_path)
+    (folder / "blank-template.pdf").unlink()
+    assert _split_after_loading(folder) is False
+
+
+@pytest.mark.parametrize(
+    ("choice", "opens", "remembered"),
+    [
+        ("grade-asap", True, True),
+        ("grade-at-end", True, False),
+        ("run-only", False, None),
+    ],
+)
+def test_run_pipeline_asks_when_grading_opens_and_a_finished_run_says_so(
+    monkeypatch, tmp_path, choice, opens, remembered  # noqa: ANN001
+) -> None:
+    from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
+    from textual.widgets import ProgressBar
+
+    out_dir = tmp_path / "cohort"
+    subs_dir = out_dir / "submissions"
+    subs_dir.mkdir(parents=True)
+    (subs_dir / "student1.submission.md").write_text("# stub")
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    requests: list = []
+
+    def fake_run_pipeline(request, *, progress=None):  # noqa: ANN001, ANN202
+        requests.append(request)
+        progress.stage_start("extract")
+        progress.count(1, 1)
+        progress.stage_start("auto-grade")
+        progress.count(0, 3)
+        progress.count(3, 3)
+        return PipelineReport(
+            stages=(
+                StageOutcome(stage="extract", status=StageStatus.RAN, message="ok"),
+                StageOutcome(stage="auto-grade", status=StageStatus.RAN, message="ok"),
+            ),
+            submissions_dir=request.submissions_dir,
+            qa_file=request.qa_file,
+        )
+
+    monkeypatch.setattr(setup_screen, "run_pipeline", fake_run_pipeline)
+    events: list[tuple[str, str]] = []
+    original = SetupScreen.LaunchRequested.__init__
+
+    def _spy(self, qa_path: str, submissions_path: str) -> None:  # noqa: ANN001
+        events.append((qa_path, submissions_path))
+        original(self, qa_path, submissions_path)
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            before = screen._remembered_grade_as_ready()
+            app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+            app.query_one("#pipe-out", Input).value = str(out_dir)
+            app.query_one("#pipe-qa", Input).value = str(qa)
+            screen._ask_how_to_run()
+            await pilot.pause()
+            buttons = [
+                str(button.id).removeprefix("prepare-folder-")
+                for button in app.screen.query(Button)
+            ]
+            assert requests == []  # nothing runs before the answer
+            app.screen.query_one(f"#prepare-folder-{choice}", Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            bar = screen.query_one("#pipe-progress-bar", ProgressBar)
+            return (
+                buttons,
+                before,
+                screen._remembered_grade_as_ready(),
+                str(screen.query_one("#pipe-progress-status", Static).render()),
+                (bar.total, bar.progress, bar.has_class("hidden")),
+            )
+
+    SetupScreen.LaunchRequested.__init__ = _spy  # type: ignore[method-assign]
+    try:
+        buttons, before, after, status, bar = asyncio.run(run())
+    finally:
+        SetupScreen.LaunchRequested.__init__ = original  # type: ignore[method-assign]
+
+    assert sorted(buttons) == ["cancel", "grade-asap", "grade-at-end", "run-only"]
+    assert len(requests) == 1
+    pair = (str(qa), str(subs_dir))
+    assert events == ([pair] if opens else [])
+    assert after == (before if remembered is None else remembered)
+    # The run is over: the status says so and no bar is left moving.
+    assert status.startswith("Done — 1 submission(s) ready, auto-graded.")
+    assert ("Press Launch Grading" in status) is (not opens)
+    assert bar == (3, 3, True)
+
+
+def test_a_remembered_run_choice_skips_the_question_until_set_back_to_ask(
+    monkeypatch, tmp_path  # noqa: ANN001
+) -> None:
+    from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
+    from opengrader.core.pipeline_settings import load_machine_settings
+    from textual.widgets import RadioButton
+
+    from opengrader.tui.ui.screens.prepare_folder_screen import PrepareFolderScreen
+
+    out_dir = tmp_path / "cohort"
+    subs_dir = out_dir / "submissions"
+    subs_dir.mkdir(parents=True)
+    (subs_dir / "student1.submission.md").write_text("# stub")
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    requests: list = []
+
+    def fake_run_pipeline(request, *, progress=None):  # noqa: ANN001, ANN202
+        requests.append(request)
+        return PipelineReport(
+            stages=(StageOutcome(stage="extract", status=StageStatus.RAN, message="ok"),),
+            submissions_dir=request.submissions_dir,
+            qa_file=request.qa_file,
+        )
+
+    monkeypatch.setattr(setup_screen, "run_pipeline", fake_run_pipeline)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        SetupScreen, "_pipe_open", lambda self, qa_path, sub_path: opened.append(sub_path)
+    )
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+            app.query_one("#pipe-out", Input).value = str(out_dir)
+            app.query_one("#pipe-qa", Input).value = str(qa)
+
+            async def press_run() -> bool:
+                """Run Pipeline; True when the question was shown."""
+                screen._ask_how_to_run()
+                await pilot.pause()
+                asked = isinstance(app.screen, PrepareFolderScreen)
+                if asked:
+                    app.screen.query_one("#prepare-folder-remember").value = True
+                    await pilot.pause()
+                    app.screen.query_one("#prepare-folder-run-only", Button).press()
+                    await pilot.pause()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                return asked
+
+            first = await press_run()
+            saved = load_machine_settings().run_choice
+            ticked = screen.query_one("#pipe-run-run-only", RadioButton).value
+            second = await press_run()
+            screen.query_one("#pipe-run-ask", RadioButton).value = True
+            await pilot.pause()
+            third = await press_run()
+            return first, saved, ticked, second, third
+
+    first, saved, ticked, second, third = asyncio.run(run())
+
+    assert (first, second, third) == (True, False, True)
+    assert saved == "run-only" and ticked
+    assert len(requests) == 3
+    assert opened == []  # "Just run it" never opens grading
+
+
+def test_the_auto_grade_line_says_what_ai_would_add_and_offers_it_only_then() -> None:
+    from opengrader.tui.ui.screens.prepare_folder_screen import PrepareFolderScreen
+
+    async def look(settings):  # noqa: ANN001, ANN202
+        app_config.save_settings(settings)
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            area = screen.query_one("#pipe-auto-grade-ai-area")
+            hidden_unticked = area.has_class("hidden")
+            screen.query_one("#pipe-auto-grade", Checkbox).value = True
+            await pilot.pause()
+            text = str(screen.query_one("#pipe-auto-grade-ai", Static).render())
+            button = screen.query_one("#pipe-ai-help", Button)
+            shown = (not area.has_class("hidden"), bool(button.display))
+            dialog = None
+            if button.display:
+                screen._offer_ai_help()
+                await pilot.pause()
+                assert isinstance(app.screen, PrepareFolderScreen)
+                dialog = [str(b.label) for b in app.screen.query(Button)]
+            return hidden_unticked, text, shown, dialog
+
+    hidden, text, shown, dialog = asyncio.run(look(app_config.AISettings()))
+    assert hidden
+    assert shown == (True, True)
+    assert "even multiple choice is left for you" in text
+    assert dialog == ["Not now", "AI setup…", "Use my AI assistant…"]
+
+    _hidden, text, shown, dialog = asyncio.run(
+        look(app_config.AISettings(read_handwriting=True, grade_written=True))
+    )
+    assert "suggests a grade" in text
+    assert shown == (True, False) and dialog is None
+
+
+@pytest.mark.parametrize("ai_grades", [False, True])
+def test_the_first_auto_graded_run_offers_ai_help_once_and_grading_still_opens(
+    monkeypatch, tmp_path, ai_grades  # noqa: ANN001
+) -> None:
+    from opengrader.core.grading import automated
+    from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
+    from opengrader.tui.ui.screens.prepare_folder_screen import PrepareFolderScreen
+
+    app_config.save_settings(app_config.AISettings(grade_written=ai_grades))
+    monkeypatch.setattr(
+        automated,
+        "grading_coverage",
+        lambda _folder: automated.GradingCoverage(scored=3, total=10, unread=5),
+    )
+    out_dir = tmp_path / "cohort"
+    (out_dir / "submissions").mkdir(parents=True)
+    (out_dir / "submissions" / "s1.submission.md").write_text("# stub")
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+
+    def fake_run_pipeline(request, *, progress=None):  # noqa: ANN001, ANN202
+        return PipelineReport(
+            stages=(
+                StageOutcome(stage="extract", status=StageStatus.RAN, message="ok"),
+                StageOutcome(stage="auto-grade", status=StageStatus.RAN, message="ok"),
+            ),
+            submissions_dir=request.submissions_dir,
+            qa_file=request.qa_file,
+        )
+
+    monkeypatch.setattr(setup_screen, "run_pipeline", fake_run_pipeline)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        SetupScreen, "_pipe_open", lambda self, qa_path, sub_path: opened.append(sub_path)
+    )
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+            app.query_one("#pipe-out", Input).value = str(out_dir)
+            app.query_one("#pipe-qa", Input).value = str(qa)
+            app.query_one("#pipe-auto-grade", Checkbox).value = True
+            seen = []
+            for _ in range(2):
+                screen._run_pipeline(grade_as_ready=False)
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                if isinstance(app.screen, PrepareFolderScreen):
+                    seen.append(str(app.screen.query_one("#prepare-folder-found", Static).render()))
+                    opened_before_answer = list(opened)
+                    app.screen.query_one("#prepare-folder-cancel", Button).press()
+                    await pilot.pause()
+                    assert opened_before_answer == []  # it waits for the answer
+                else:
+                    seen.append(None)
+            return seen
+
+    seen = asyncio.run(run())
+
+    assert len(opened) == 2  # grading opened after both runs
+    if ai_grades:
+        assert seen == [None, None]  # an AI already grades: nothing to offer
+    else:
+        first, second = seen
+        assert second is None  # once only
+        assert "Auto-graded 3 of 10 answers. 7 are left for you." in first
+        assert "5 of them were not read off the page at all" in first
+        assert "2 were read but the key" in first
+
+
+def test_the_auto_grade_ai_area_is_only_as_tall_as_what_it_holds() -> None:
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            area = screen.query_one("#pipe-auto-grade-ai-area")
+            for section in area.ancestors_with_self:
+                if isinstance(section, Collapsible):
+                    section.collapsed = False
+            screen.query_one("#pipe-auto-grade", Checkbox).value = True
+            await pilot.pause()
+            await pilot.pause()
+            area = screen.query_one("#pipe-auto-grade-ai-area")
+            last = max(child.region.bottom for child in area.children if child.display)
+            return area.region, last
+
+    region, last = asyncio.run(run())
+    assert region.height > 0
+    assert region.bottom == last  # nothing empty below what it holds
+
+
+def test_choosing_the_assistant_before_a_run_opens_its_copy_screen_when_it_finishes(
+    monkeypatch, tmp_path  # noqa: ANN001
+) -> None:
+    from opengrader.core.grading import automated
+    from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
+    from opengrader.core.pipeline_settings import load_machine_settings
+    from opengrader.tui.ui.screens.prepare_folder_screen import PrepareFolderScreen
+
+    monkeypatch.setattr(
+        automated,
+        "grading_coverage",
+        lambda _folder: automated.GradingCoverage(scored=3, total=10, unread=5),
+    )
+    out_dir = tmp_path / "cohort"
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+
+    def fake_run_pipeline(request, *, progress=None):  # noqa: ANN001, ANN202
+        subs = request.submissions_dir / "s1"
+        subs.mkdir(parents=True, exist_ok=True)
+        (subs / "s1.submission.md").write_text("# stub")
+        return PipelineReport(
+            stages=(
+                StageOutcome(stage="extract", status=StageStatus.RAN, message="ok"),
+                StageOutcome(stage="auto-grade", status=StageStatus.RAN, message="ok"),
+            ),
+            submissions_dir=request.submissions_dir,
+            qa_file=request.qa_file,
+        )
+
+    monkeypatch.setattr(setup_screen, "run_pipeline", fake_run_pipeline)
+    events: list[str] = []
+    monkeypatch.setattr(
+        SetupScreen, "_pipe_open", lambda self, qa_path, sub_path: events.append("grading")
+    )
+    monkeypatch.setattr(SetupScreen, "_open_assistant", lambda self, purpose="grading": events.append("assistant"))
+    # Ready for the assistant once a run has read something.
+    monkeypatch.setattr(SetupScreen, "_refresh_assistant_card", lambda self: None)
+    monkeypatch.setattr(
+        SetupScreen,
+        "_assistant_state",
+        lambda self: SimpleNamespace(
+            can_grade=any((out_dir / "submissions").rglob("*.submission.md"))
+        ),
+    )
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+            app.query_one("#pipe-out", Input).value = str(out_dir)
+            app.query_one("#pipe-qa", Input).value = str(qa)
+            app.query_one("#pipe-auto-grade", Checkbox).value = True
+            await pilot.pause()
+
+            # Before any run: nothing is read yet, so it waits for the run.
+            screen._offer_ai_help()
+            await pilot.pause()
+            assert isinstance(app.screen, PrepareFolderScreen)
+            app.screen.query_one("#prepare-folder-remember", Checkbox).value = True
+            await pilot.pause()
+            app.screen.query_one("#prepare-folder-assistant", Button).press()
+            await pilot.pause()
+            assert events == []
+            saved = load_machine_settings().ai_help_choice
+
+            for _ in range(2):  # remembered: every run, no offer in between
+                screen._run_pipeline(grade_as_ready=False)
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                assert not isinstance(app.screen, PrepareFolderScreen)
+
+            # The button, answered for good: straight to the assistant.
+            screen._offer_ai_help()
+            await pilot.pause()
+            asked_again = isinstance(app.screen, PrepareFolderScreen)
+            return saved, asked_again
+
+    saved, asked_again = asyncio.run(run())
+
+    assert saved == "assistant"
+    assert events == ["grading", "assistant", "grading", "assistant", "assistant"]
+    assert not asked_again

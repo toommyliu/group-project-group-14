@@ -6,7 +6,9 @@ A roster comes in one of two shapes, told apart by the file's extension:
   `ID<TAB>NAME`. What the pipeline has always read.
 * **comma-separated** (`.csv`): a heading row with First Name, Last Name and
   SID, and optionally Email. What the browser's People page has always
-  imported, and what a learning-management system exports.
+  imported. A learning-management system's export is read too — a Canvas
+  gradebook's `Student` (`Last, First`) and `SIS User ID` columns — but a
+  roster with one name column is not edited here (`_csv_layout` says why).
 
 Both are read into the same `StudentDetails`, so classic's name matching and
 the browser's roster work from one file whichever it is.
@@ -171,7 +173,9 @@ def csv_has_roster_headings(text: str) -> bool:
         headings = next(csv.reader(io.StringIO(body, newline="")), [])
     except csv.Error:
         return False
-    return {"first_name", "last_name", "sid"} <= set(_columns(headings))
+    from opengrader.core.workspace.roster import missing_roster_columns
+
+    return not missing_roster_columns(_columns(headings))
 
 
 @dataclass(frozen=True)
@@ -250,6 +254,12 @@ def _csv_layout(body: str) -> tuple[list[str], list[_Record], dict[str, int]]:
         raise ValueError("The roster file is empty.")
     columns = _columns(records[0].cells)
     if not {"first_name", "last_name", "sid"} <= set(columns):
+        if "sid" in columns and "name" in columns:
+            raise ValueError(
+                "This roster keeps each name in one column (as a Canvas export "
+                "does), so it is read here but not changed. Change it where it "
+                "came from, or add First Name and Last Name columns to it."
+            )
         raise ValueError(
             "The roster's first row needs First Name, Last Name, and SID "
             "column headings."

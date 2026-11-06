@@ -10,6 +10,7 @@ from opengrader.cli import run_command
 from opengrader.cli import automated_grading, run as run_module
 from opengrader.cli import submission_extractor, submission_splitter
 from opengrader.core import app_config
+from opengrader.core.pipeline_settings import MachinePipelineSettings, save_machine_settings
 from opengrader.core.pipeline import (
     STAGE_AUTO_GRADE,
     STAGE_DRAFT_RUBRICS,
@@ -110,6 +111,7 @@ def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
             "--llm-min-confidence", "0.75",
             "--force",
             "--fresh",
+            "--auto-grade",
         )
     )
     request = captured["request"]
@@ -175,20 +177,19 @@ def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
     assert llm.grade_written is False
 
 
-def test_auto_grade_defaults_on_from_ai_setup(tmp_path, captured) -> None:
-    app_config.save_settings(app_config.AISettings(auto_grade=True))
-    run_command(run_module.command, _argv(tmp_path))
-    assert captured["request"].auto_grade is True
-
-
-def test_auto_grade_defaults_off_from_ai_setup(tmp_path, captured) -> None:
-    app_config.save_settings(app_config.AISettings(auto_grade=False))
+def test_auto_grade_is_off_until_it_is_opted_into(tmp_path, captured) -> None:
     run_command(run_module.command, _argv(tmp_path))
     assert captured["request"].auto_grade is False
 
 
-def test_no_auto_grade_still_works_with_ai_setup_on(tmp_path, captured) -> None:
-    app_config.save_settings(app_config.AISettings(auto_grade=True))
+def test_auto_grade_defaults_on_once_ticked_on_the_card(tmp_path, captured) -> None:
+    save_machine_settings(MachinePipelineSettings(auto_grade=True))
+    run_command(run_module.command, _argv(tmp_path))
+    assert captured["request"].auto_grade is True
+
+
+def test_no_auto_grade_still_works_with_the_card_ticked(tmp_path, captured) -> None:
+    save_machine_settings(MachinePipelineSettings(auto_grade=True))
     run_command(run_module.command, _argv(tmp_path, "--no-auto-grade"))
     assert captured["request"].auto_grade is False
 
@@ -1209,7 +1210,7 @@ def test_in_a_terminal_grading_without_ai_is_asked_and_the_run_carries_on(
     monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
     monkeypatch.setattr("builtins.input", lambda _prompt="": answer)
 
-    report = run_command(run_module.command, _argv(tmp_path))
+    report = run_command(run_module.command, _argv(tmp_path, "--auto-grade"))
 
     assert len(calls) == 2
     assert (calls[1].grade_without_ai, calls[1].auto_grade) == (grade_without_ai, auto_grade)
@@ -1338,3 +1339,23 @@ def test_the_fixed_flag_is_gone_in_favour_of_split_every_n(tmp_path, captured) -
     folder = _templated_folder(tmp_path, 12)
 
     assert _exit_status([str(folder), "--fixed"]) == 2
+
+
+def test_summary_says_how_many_papers_are_not_on_the_roster(tmp_path, capsys) -> None:
+    from types import SimpleNamespace
+
+    from opengrader.cli.run import _print_roster_coverage
+
+    (tmp_path / "roster.tsv").write_text("111111111\tAda Lovelace\n")
+    submissions = tmp_path / "submissions"
+    submissions.mkdir()
+    for stem, sid in (("a", "111111111"), ("b", "999")):
+        (submissions / f"{stem}.submission.md").write_text(
+            f"---\nstudent_id: '{sid}'\nstudent_name: X\n---\n- q1:\n  - Response text: y\n"
+        )
+
+    _print_roster_coverage(SimpleNamespace(submissions_dir=submissions, qa_file=None))
+
+    out = capsys.readouterr().out
+    assert "1 of 2 papers isn't matched to the class roster." in out
+    assert "shift+R" in out

@@ -485,3 +485,15 @@ def test_an_assignment_once_opened_in_the_browser_is_still_an_assignment(tmp_pat
 
     assert found.workspaces == ()
     assert len(found.assignments) == 2 and found.is_workspace_candidate
+
+
+def test_a_canvas_gradebook_export_is_found_as_the_roster(tmp_path) -> None:
+    _touch(tmp_path / "scan.pdf")
+    _touch(
+        tmp_path / "Grades-CMPE195.csv",
+        'Student,ID,SIS User ID\n    Points Possible,,\n"Liu, Tommy",9001,111\n',
+    )
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.roster == tmp_path / "Grades-CMPE195.csv"

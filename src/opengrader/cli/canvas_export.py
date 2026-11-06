@@ -33,6 +33,12 @@ Sections:
   Canvas course, post each section to its course with --section.
 
 \b
+Roster:
+  A paper whose student ID is not on the class roster (the class folder's,
+  the workspace's, or --roster) is skipped: its grade would reach no one, or
+  the wrong student. Match it first, or pass --allow-off-roster.
+
+\b
 Setup (one-time):
   pip install canvas-sak
   canvas-sak help-me-setup
@@ -118,6 +124,32 @@ def _call_canvas_sak(
     return result.returncode == 0, output
 
 
+def _roster_ids(
+    roster: str | None,
+    workspace_students: "list | None",
+    submissions_path: Path,
+) -> frozenset[str]:
+    """The roster's IDs to check against: `--roster`, else the workspace's
+    roster, else the class folder's; empty when there is none."""
+    from opengrader.core.roster import load_roster_students
+    from opengrader.core.submissions.roster_check import (
+        find_class_roster,
+        load_class_roster,
+        roster_ids,
+    )
+
+    if roster:
+        try:
+            return roster_ids(load_roster_students(Path(roster)))
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise click.UsageError(f"could not read the roster {roster}: {exc}") from None
+    if workspace_students:
+        return roster_ids(workspace_students)
+    found = find_class_roster(submissions_path)
+    students = load_class_roster(found[1]) if found is not None else None
+    return roster_ids(students or ())
+
+
 def _check_canvas_sak_installed() -> bool:
     return shutil.which("canvas-sak") is not None
 
@@ -163,6 +195,19 @@ def _check_canvas_sak_installed() -> bool:
         "record it), e.g. to a Canvas course of that section alone."
     ),
 )
+@click.option(
+    "--roster",
+    metavar="PATH",
+    help=(
+        "The class roster to check student IDs against (default: the class "
+        "folder's, or the workspace's)."
+    ),
+)
+@click.option(
+    "--allow-off-roster",
+    is_flag=True,
+    help="Post papers whose student ID is not on the roster instead of skipping them.",
+)
 def command(
     *,
     submissions: str | None,
@@ -174,6 +219,8 @@ def command(
     partial: bool,
     attach_pdf: bool,
     section: str | None,
+    roster: str | None = None,
+    allow_off_roster: bool = False,
 ) -> None:
     """Export graded submission files to Canvas LMS via canvas_sak."""
     if not _check_canvas_sak_installed():
@@ -185,6 +232,7 @@ def command(
         )
         sys.exit(1)
 
+    roster_students = None
     if submissions:
         submissions_path = Path(submissions)
         try:
@@ -216,6 +264,14 @@ def command(
                 )
                 for item in opened.submissions(assignment_id)
             ]
+            if not roster:
+                from opengrader.core.roster import RosterStudent
+                from opengrader.core.workspace import roster as workspace_roster
+
+                roster_students = [
+                    RosterStudent(student.sid, student.name)
+                    for student in workspace_roster.students(opened)
+                ] or None
         except (OSError, ValueError) as exc:
             raise click.UsageError(str(exc)) from None
 
@@ -231,6 +287,7 @@ def command(
             )
             sys.exit(1)
 
+    roster_ids = _roster_ids(roster, roster_students, submissions_path)
     curve = read_curve(submissions_path)
     mode = "[DRY RUN] " if dry_run else ""
     print(f"{mode}Exporting grades to Canvas: course={course!r} assignment={assignment!r}")
@@ -255,6 +312,18 @@ def command(
             print("    SKIP: student_id is empty in submission frontmatter\n")
             skipped += 1
             continue
+
+        if roster_ids and not allow_off_roster:
+            from opengrader.core.submissions.roster_check import is_unmatched
+
+            if is_unmatched(doc.student_id, roster_ids):
+                print(
+                    f"    SKIP: student id {doc.student_id.strip()!r} is not on the class "
+                    "roster — match the paper to a student first (review queue, "
+                    "shift+R), or pass --allow-off-roster\n"
+                )
+                skipped += 1
+                continue
 
         raw_total = _total_score(doc)
         possible = _possible_score(doc)

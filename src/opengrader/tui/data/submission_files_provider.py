@@ -4,7 +4,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from opengrader.core.grading.rubric_edit import diff_rubric_options
 from opengrader.core.grading.files import FileGradingSession
@@ -40,6 +40,7 @@ from opengrader.core.history import (
     resolve_history_dir,
 )
 from opengrader.core.pdf.pdf_preview import get_pdf_page_count
+from opengrader.core.roster import RosterStudent
 from opengrader.core.qa_file import (
     QARubricFlatOption,
     QARubricItem,
@@ -97,6 +98,7 @@ from opengrader.core.submissions.regrade import (
 from opengrader.core.submissions.review import (
     ReviewReason,
     build_review_flags,
+    flag_off_roster,
     flag_regrade_requests,
     flag_rubric_drift,
     flag_submission,
@@ -132,6 +134,9 @@ from opengrader.tui.data.models import (
     SimilarityReportPair,
     StudentSummary,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from opengrader.core.submissions.roster_check import RosterCoverage
 
 
 _T = TypeVar("_T")
@@ -183,6 +188,9 @@ class SubmissionFilesProvider:
         self._generation = 0
         self._report_cache: dict[object, object] = {}
         self._report_cache_fingerprint: tuple[object, ...] | None = None
+        # The class roster, looked up once; read again when a file changes.
+        self._roster_paths: tuple[Path, ...] | None = None
+        self._roster_loaded: tuple[tuple[object, ...], list[RosterStudent] | None] | None = None
 
     @property
     def submissions_path(self) -> Path:
@@ -532,8 +540,43 @@ class SubmissionFilesProvider:
             pass
 
 
+    def roster_paths(self) -> tuple[Path, ...]:
+        """The class folder's roster file(s), or () when it has none."""
+        if self._roster_paths is None:
+            from opengrader.core.submissions.roster_check import find_class_roster
+
+            found = find_class_roster(self._submissions_path, self._qa_path)
+            self._roster_paths = found[1] if found is not None else ()
+        return self._roster_paths
+
+    def _roster_fingerprint(self) -> tuple[object, ...]:
+        return tuple((path, file_mtime_ns(path)) for path in self.roster_paths())
+
+    def roster_students(self) -> list[RosterStudent] | None:
+        """Everyone on the class roster; None without a readable roster."""
+        from opengrader.core.submissions.roster_check import load_class_roster
+
+        fingerprint = self._roster_fingerprint()
+        if not fingerprint:
+            return None
+        if self._roster_loaded is None or self._roster_loaded[0] != fingerprint:
+            self._roster_loaded = (fingerprint, load_class_roster(self.roster_paths()))
+        return self._roster_loaded[1]
+
+    def roster_coverage(self) -> RosterCoverage | None:
+        """Which papers are not matched to the roster; None without one."""
+        from opengrader.core.submissions.roster_check import roster_coverage
+
+        roster = self.roster_students()
+        if not roster:
+            return None
+        return roster_coverage(
+            [submission.grading.document for submission in self._submissions], roster
+        )
+
     def _cohort_fingerprint(self) -> tuple[object, ...]:
         return (
+            self._roster_fingerprint(),
             self._generation,
             tuple(
                 (submission.grading.path, submission.grading.mtime_ns)
@@ -566,6 +609,7 @@ class SubmissionFilesProvider:
     def _build_review_items(self) -> list[ReviewItem]:
         items: list[ReviewItem] = []
         item_id_by_norm_id: dict[str, str] = {}
+        roster = self.roster_students()
         for index, submission in enumerate(self._submissions):
             item_id = f"s{index + 1}"
             document = submission.grading.document
@@ -574,10 +618,18 @@ class SubmissionFilesProvider:
                 item_id_by_norm_id.setdefault(norm_id, item_id)
             display_id = document.student_id.strip() or item_id
             source_pdf_name = Path(document.source_pdf).name if document.source_pdf else ""
-            for flag in flag_submission(document, version=submission.version):
+            flags = flag_submission(document, version=submission.version)
+            if roster:
+                flags += flag_off_roster(roster, [document])
+            for flag in flags:
                 candidates = (
                     document.id_candidates
-                    if flag.reason in (ReviewReason.MISSING_STUDENT_ID, ReviewReason.MALFORMED_STUDENT_ID)
+                    if flag.reason
+                    in (
+                        ReviewReason.MISSING_STUDENT_ID,
+                        ReviewReason.MALFORMED_STUDENT_ID,
+                        ReviewReason.NOT_ON_ROSTER,
+                    )
                     else ()
                 )
                 items.append(
@@ -628,6 +680,19 @@ class SubmissionFilesProvider:
             )
         )
         return items
+
+    def identity_crops(self, student_item_id: str) -> tuple[tuple[Path, ...], str]:
+        """The name and ID boxes cut from this paper's scan (those that exist)
+        and the ID as read, for matching it to the roster by eye."""
+        submission = self._submission_for_student_item(student_item_id)
+        document = submission.grading.document
+        base = submission.grading.path.parent
+        crops = tuple(
+            path
+            for raw in (document.name_image_path, document.id_image_path)
+            if raw and (path := (base / raw).resolve()).is_file()
+        )
+        return crops, document.student_id.strip()
 
     def assign_student_identity(
         self,
@@ -936,12 +1001,15 @@ class SubmissionFilesProvider:
         documents = [submission.grading.document for submission in self._submissions]
         return build_readiness_report(
             documents,
-            review_flags=build_review_flags(
-                documents,
-                regrade_requests=open_regrade_requests(self._submissions_path),
-                stale_grades=detect_rubric_drift(read_journal(self._history_dir)),
-                qa_document=self._qa_doc,
-            ),
+            review_flags=[
+                *build_review_flags(
+                    documents,
+                    regrade_requests=open_regrade_requests(self._submissions_path),
+                    stale_grades=detect_rubric_drift(read_journal(self._history_dir)),
+                    qa_document=self._qa_doc,
+                ),
+                *flag_off_roster(self.roster_students() or [], documents),
+            ],
             consistency_flags=build_consistency_flags(documents),
             claims=self.read_work_claims(),
             curve=self.read_curve(),

@@ -31,9 +31,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
-from opengrader.core.class_folder import find_roster
-from opengrader.core.pipeline_settings import load_folder_settings
-from opengrader.core.roster import parse_roster_arg
 from opengrader.core.workspace import roster
 from opengrader.core.workspace.context import inputs_for_assignment, resolve_path
 from opengrader.core.workspace.folder_session import write_student_file
@@ -109,31 +106,15 @@ def _class_folder(workspace: Workspace, assignment_id: str) -> Path:
 
 def roster_source(workspace: Workspace, assignment_id: str) -> RosterSource | None:
     """The roster file(s) this class folder uses, or None when it has none."""
-    folder = _class_folder(workspace, assignment_id)
-    saved = load_folder_settings(folder)
-    if saved is not None and saved.use_section_rosters and saved.section_rosters:
-        paths = []
-        for entry in saved.section_rosters:
-            path = parse_roster_arg(entry)[0]
-            path = path if path.is_absolute() else folder / path
-            if path.is_file():
-                paths.append(path.resolve())
-        if paths:
-            return RosterSource(tuple(dict.fromkeys(paths)))
-    if saved is not None and saved.use_roster and saved.roster:
-        path = Path(saved.roster)
-        if path.is_file():
-            return RosterSource((path.resolve(),))
-    # Nothing chosen by hand (or it has gone): whatever the folder holds. A
-    # roster left unticked in the pipeline card is still offered here — that
-    # tick decides whether extraction matches names, not whether there is a
+    from opengrader.core.submissions.roster_check import class_roster_paths
+
+    # What the pipeline card saved, else whatever the folder holds. A roster
+    # left unticked in the pipeline card is still offered here — that tick
+    # decides whether extraction matches names, not whether there is a
     # roster.
-    try:
-        found = find_roster(folder)
-    except OSError:
-        found = None
-    if found is not None:
-        return RosterSource((found.resolve(),))
+    paths = class_roster_paths(_class_folder(workspace, assignment_id))
+    if paths:
+        return RosterSource(paths)
     # Nothing in the folder looks like a roster right now. If the file used
     # last time is still there, it is still the roster: a file caught
     # mid-save, or saved in an encoding this cannot read, is a roster with a

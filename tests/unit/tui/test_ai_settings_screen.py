@@ -452,7 +452,6 @@ def test_new_ai_switches_round_trip_through_collect() -> None:
             screen.query_one("#ai-grade-written", Checkbox).value = True
             await pilot.pause()
             screen.query_one("#ai-require-calibration", Checkbox).value = True
-            screen.query_one("#ai-auto-grade", Checkbox).value = False
             await pilot.pause()
             await pilot.click("#ai-save")
             await pilot.pause()
@@ -465,7 +464,6 @@ def test_new_ai_switches_round_trip_through_collect() -> None:
     assert result.transcribe_math is True
     assert result.grade_written is True
     assert result.require_calibration is True
-    assert result.auto_grade is False
 
     reloaded = app_config.load_settings()
     assert reloaded.read_handwriting is True
@@ -473,21 +471,17 @@ def test_new_ai_switches_round_trip_through_collect() -> None:
     assert reloaded.transcribe_math is True
     assert reloaded.grade_written is True
     assert reloaded.require_calibration is True
-    assert reloaded.auto_grade is False
 
 
-def test_auto_grade_defaults_on() -> None:
-    async def run() -> AISettings | None:
+def test_auto_grade_is_not_an_ai_setting() -> None:
+    # It lives on the Prepare an assignment card (#pipe-auto-grade).
+    async def run() -> int:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            await pilot.click("#ai-save")
-            await pilot.pause()
-        return app.result
+            return len(app.screen.query("#ai-auto-grade"))
 
-    result = asyncio.run(run())
-    assert result is not None
-    assert result.auto_grade is True
+    assert asyncio.run(run()) == 0
 
 
 def test_handwriting_suboptions_hidden_until_ticked() -> None:

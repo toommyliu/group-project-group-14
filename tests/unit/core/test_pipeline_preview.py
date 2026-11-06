@@ -81,7 +81,7 @@ def test_grading_turned_off_says_where_to_turn_it_on(tmp_path) -> None:
         _request(tmp_path, auto_grade=False, pages_per_submission=4), plans
     )
 
-    assert any("AI setup" in fix for fix in preview.fixes)
+    assert any("Auto-grade after reading the scans" in fix for fix in preview.fixes)
 
 
 def test_a_finished_folder_says_it_is_up_to_date(tmp_path) -> None:

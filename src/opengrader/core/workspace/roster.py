@@ -25,14 +25,59 @@ from opengrader.core.workspace.store import (
 )
 
 MAX_ROSTER_BYTES = 2_000_000
+# Column headings, compared without case or extra spaces, and the field each
+# fills. Besides the browser's own (First Name, Last Name, SID) this reads
+# what learning-management systems export: a Canvas gradebook has one
+# `Student` column (`Last, First`) and the student ID under `SIS User ID`;
+# its own `ID` column is Canvas's internal number, so `id` is not a heading.
 _COLUMNS = {
     "first name": "first_name",
+    "given name": "first_name",
     "last name": "last_name",
+    "surname": "last_name",
+    "family name": "last_name",
     "sid": "sid",
+    "student id": "sid",
+    "student number": "sid",
+    "sis user id": "sid",
+    "sis id": "sid",
+    "student": "name",
+    "student name": "name",
+    "name": "name",
+    "full name": "name",
     "email": "email",
+    "email address": "email",
     "role": "role",
 }
 _REQUIRED = {"first_name": "First Name", "last_name": "Last Name", "sid": "SID"}
+# Rows a Canvas gradebook export holds that are not students.
+_NOT_STUDENTS = frozenset({"points possible", "student, test", "test student"})
+
+
+def missing_roster_columns(fields: "set[str] | dict[str, int]") -> list[str]:
+    """The headings a roster still needs, given the fields its first row has:
+    an ID, and a name as First Name + Last Name or as one name column."""
+    present = set(fields)
+    missing = [] if "sid" in present else ["SID"]
+    if "name" not in present:
+        missing += [
+            label
+            for field, label in _REQUIRED.items()
+            if field != "sid" and field not in present
+        ]
+    return missing
+
+
+def _name_fields(name: str) -> dict[str, str]:
+    """One name column as first and last: `Last, First` (as Canvas writes
+    it) or `First … Last`."""
+    from opengrader.core.workspace.roster_file import split_name
+
+    if "," in name:
+        last, first = (part.strip() for part in name.split(",", 1))
+        return {"first_name": first, "last_name": last}
+    first, last = split_name(name.strip())
+    return {"first_name": first, "last_name": last}
 _ORDER = (
     "ORDER BY CASE last_name WHEN '' THEN first_name ELSE last_name END COLLATE NOCASE, "
     "first_name COLLATE NOCASE, sid"
@@ -92,11 +137,12 @@ def read_roster_csv(data: bytes) -> tuple[list[RosterRow], list[RosterProblem]]:
                 RosterProblem(message=f"There is more than one {heading.strip()} column.")
             )
         columns.setdefault(field, index)
-    missing = [label for field, label in _REQUIRED.items() if field not in columns]
+    missing = missing_roster_columns(columns)
     if missing:
         problems.append(
             RosterProblem(
-                message="The first row needs First Name, Last Name, and SID column headings. "
+                message="The first row needs First Name, Last Name, and SID column headings "
+                "(a Canvas gradebook export's Student and SIS User ID work too). "
                 f"Missing: {', '.join(missing)}.",
             )
         )
@@ -131,6 +177,14 @@ def read_roster_csv(data: bytes) -> tuple[list[RosterRow], list[RosterProblem]]:
                 )
             )
             continue
+        if "name" in cells:
+            name = cells.pop("name")
+            if " ".join(name.split()).casefold() in _NOT_STUDENTS or not (
+                name.strip() or cells.get("sid", "").strip()
+            ):
+                continue  # a Canvas export's points row or its test student
+            if not ("first_name" in cells and "last_name" in cells):
+                cells.update(_name_fields(name))
         try:
             rows.append(RosterRow(number, StudentDetails.model_validate(cells)))
         except ValidationError as exc:

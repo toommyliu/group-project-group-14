@@ -7,8 +7,9 @@ Two files, split by what a setting describes:
   the run ledger. Quiz 1's six pages must not follow you to quiz 2, and the
   file travels with the folder (paths inside it are stored relative to it).
 * **this computer** — parallel jobs, whether grading opens as submissions
-  arrive, the class folder used last, the points Create answer key gives a
-  question that states none — in `pipeline.json` beside the AI settings.
+  arrive, whether a run auto-grades, the class folder used last, the points
+  Create answer key gives a question that states none — in `pipeline.json`
+  beside the AI settings.
 
 One-shot overrides ("grade it anyway", "start over") are deliberately not
 fields here: a remembered "ignore scan warnings" would silently grade the next
@@ -30,6 +31,22 @@ FOLDER_SETTINGS_FILENAME = "pipeline-settings.json"
 MACHINE_SETTINGS_FILENAME = "pipeline.json"
 
 _VERSION = 1
+
+# What Run Pipeline does once the card is filled in: "" asks every time;
+# the others are a remembered answer, run without asking.
+RUN_ASK = ""
+RUN_GRADE_ASAP = "grade-asap"
+RUN_GRADE_AT_END = "grade-at-end"
+RUN_ONLY = "run-only"
+RUN_CHOICES = (RUN_ASK, RUN_GRADE_ASAP, RUN_GRADE_AT_END, RUN_ONLY)
+
+# "Get help from AI" answered once and for all: "" asks; ASSISTANT opens the
+# AI assistant's copy screen after every run that leaves answers for a
+# person; AI_SETUP goes straight to AI setup.
+AI_HELP_ASK = ""
+AI_HELP_ASSISTANT = "assistant"
+AI_HELP_AI_SETUP = "ai-setup"
+AI_HELP_CHOICES = (AI_HELP_ASK, AI_HELP_ASSISTANT, AI_HELP_AI_SETUP)
 
 
 @dataclass(frozen=True)
@@ -60,6 +77,18 @@ class FolderPipelineSettings:
 @dataclass(frozen=True)
 class MachinePipelineSettings:
     grade_as_ready: bool = True
+    # Opt-in: a run scores what the answer key settles outright only when a
+    # person ticked "Auto-grade after reading the scans". Saved for every
+    # folder on this computer, not one assignment.
+    auto_grade: bool = False
+    # Run Pipeline's question answered once and for all (`RUN_CHOICES`);
+    # RUN_ASK = ask every time.
+    run_choice: str = RUN_ASK
+    # The one-time "an AI can help with what auto-grading left" offer after
+    # the first auto-graded run has been shown on this computer.
+    ai_help_offered: bool = False
+    # `AI_HELP_CHOICES`; AI_HELP_ASK = ask every time.
+    ai_help_choice: str = AI_HELP_ASK
     # None = let Opengrader pick the number of parallel extractions.
     jobs: int | None = None
     last_class_folder: str = ""
@@ -171,6 +200,17 @@ def load_machine_settings() -> MachinePipelineSettings:
     return MachinePipelineSettings(
         # Absent or anything but an explicit false keeps the default (on).
         grade_as_ready=data.get("grade_as_ready") is not False,
+        # Absent or anything but an explicit true keeps the default (off).
+        auto_grade=data.get("auto_grade") is True,
+        ai_help_offered=data.get("ai_help_offered") is True,
+        ai_help_choice=(
+            data["ai_help_choice"]
+            if data.get("ai_help_choice") in AI_HELP_CHOICES
+            else AI_HELP_ASK
+        ),
+        run_choice=(
+            data["run_choice"] if data.get("run_choice") in RUN_CHOICES else RUN_ASK
+        ),
         jobs=jobs if _positive_int(jobs) else None,
         last_class_folder=last if isinstance(last, str) else "",
         answer_key_points=float(points) if _positive_number(points) else None,
@@ -181,7 +221,14 @@ def save_machine_settings(settings: MachinePipelineSettings) -> Path:
     body: dict[str, object] = {
         "version": _VERSION,
         "grade_as_ready": settings.grade_as_ready,
+        "auto_grade": settings.auto_grade,
     }
+    if settings.ai_help_offered:
+        body["ai_help_offered"] = True
+    if settings.ai_help_choice in AI_HELP_CHOICES and settings.ai_help_choice != AI_HELP_ASK:
+        body["ai_help_choice"] = settings.ai_help_choice
+    if settings.run_choice in RUN_CHOICES and settings.run_choice != RUN_ASK:
+        body["run_choice"] = settings.run_choice
     if settings.jobs:
         body["jobs"] = settings.jobs
     if settings.last_class_folder:

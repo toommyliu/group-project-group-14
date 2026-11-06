@@ -192,3 +192,53 @@ def test_a_student_the_file_does_not_have_is_a_lookup_error() -> None:
             with_student_removed(text, kind, "9999")
         with pytest.raises(LookupError):
             with_student_changed(text, kind, "9999", _student("9999", "No", "One"))
+
+
+# A Canvas gradebook export, as downloaded: its points row and test student
+# are not students, and its own ID column is Canvas's, not the school's.
+CANVAS = (
+    "Student,ID,SIS User ID,SIS Login ID,Section,Quiz 1 (1234)\n"
+    "    Points Possible,,,,,10\n"
+    '"Liu, Tommy",9001,111111111,tliu,CMPE 195-01,8\n'
+    '"Cortes, Andy",9002,222222222,acortes,CMPE 195-01,\n'
+    '"Student, Test",9999,,,CMPE 195-01,\n'
+)
+
+
+def test_a_canvas_export_reads_as_a_roster(tmp_path) -> None:
+    assert csv_has_roster_headings(CANVAS)
+    students = parse_roster(CANVAS, "csv").students
+    assert [(s.sid, s.first_name, s.last_name) for s in students] == [
+        ("111111111", "Tommy", "Liu"),
+        ("222222222", "Andy", "Cortes"),
+    ]
+    path = tmp_path / "Grades-CMPE195.csv"
+    path.write_text(CANVAS)
+    assert [(s.student_id, s.name) for s in load_roster_students(path)] == [
+        ("111111111", "Tommy Liu"),
+        ("222222222", "Andy Cortes"),
+    ]
+
+
+def test_a_one_name_column_roster_splits_first_and_last() -> None:
+    text = "Name,Student ID\nAda Lovelace,1\nGrace Brewster Hopper,2\n"
+    students = parse_roster(text, "csv").students
+    assert [(s.first_name, s.last_name) for s in students] == [
+        ("Ada", "Lovelace"),
+        ("Grace Brewster", "Hopper"),
+    ]
+
+
+def test_a_canvas_export_is_read_but_not_edited() -> None:
+    with pytest.raises(ValueError, match="one column"):
+        with_student_changed(
+            CANVAS,
+            "csv",
+            "111111111",
+            StudentDetails(sid="111111111", first_name="T", last_name="Liu"),
+        )
+
+
+def test_a_csv_without_an_id_column_is_still_not_a_roster() -> None:
+    assert not csv_has_roster_headings("Student,ID,Section\n")
+    assert not csv_has_roster_headings("id,name\n1,Ada\n")

@@ -124,10 +124,11 @@ export default function SubmissionsPage() {
   });
   const client = useQueryClient();
   const folderSession = useFolderSession();
+  const { show } = submissionsRoute.useSearch();
   const [filter, setFilter] = useState<Filter>(() =>
     loaded.submissions.length === 0 && loaded.students?.length
       ? 'missing'
-      : 'all'
+      : (show ?? 'all')
   );
   const [kept, setKept] = useState<number[]>([]);
   const [keptStudents, setKeptStudents] = useState<string[]>([]);

@@ -300,6 +300,13 @@ export const outlineRoute = createRoute({
 export const submissionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/$assignmentId/submissions',
+  // `?show=attention` opens on the papers that need a person — what the
+  // terminal app links to when papers are not matched to the roster.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { show?: 'attention' } => ({
+    show: search.show === 'attention' ? 'attention' : undefined,
+  }),
   remountDeps: ({ params }) => params.assignmentId,
   loader: async ({ context, params: { assignmentId } }) => {
     const assignment = await requireAssignment(

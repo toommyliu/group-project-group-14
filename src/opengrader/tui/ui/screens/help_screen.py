@@ -35,8 +35,10 @@ _REPORT_ROWS: list[tuple[str, str]] = [
         "Open the needs-review queue: submissions likely holding an OCR/"
         "extraction error or low-confidence AI grade, most severe first. Each "
         "row shows its source PDF. Select a row to jump to it — or, for a "
-        "missing/duplicate student ID, to pick the right student (from the "
-        "tied roster names) or type the ID, written straight back to the file.",
+        "missing, misread or off-roster student ID, to match the paper to the "
+        "class roster: its name and ID boxes are shown, the closest students "
+        "first, typing narrows the list, and Skip moves to the next unmatched "
+        "paper. Each pick is written straight back to the file.",
     ),
     (
         "shift+G",

@@ -232,9 +232,15 @@ class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
                     id="ai-grade-written",
                 )
                 yield Static(
-                    "The model only picks options from your rubric and "
-                    "never invents a score; every suggestion is tagged for "
-                    "you to confirm or change.",
+                    "Written answers are any the answer key can't settle by "
+                    "itself: short answers and fill-in-the-blank that don't "
+                    "match it exactly, select-all with only some boxes right, "
+                    "explanations. Multiple choice, true/false and numbers are "
+                    "scored by the key, no AI needed — reading them off the "
+                    "page is what handwriting reading above is for. The model "
+                    "only picks options from your rubric and never invents a "
+                    "score; every suggestion is tagged for you to confirm or "
+                    "change.",
                     classes="ai-note",
                 )
                 with Vertical(
@@ -255,19 +261,6 @@ class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
                         "guess.",
                         classes="ai-note",
                     )
-
-                yield Checkbox(
-                    "Grade what it can as soon as extraction finishes",
-                    value=self._settings.auto_grade,
-                    id="ai-auto-grade",
-                )
-                yield Static(
-                    "The one-shot pipeline scores every answer a rubric "
-                    "can settle on its own the moment extraction is done, "
-                    "leaving only the genuinely uncertain ones for you. "
-                    "Turn it off to stop after extraction. On by default.",
-                    classes="ai-note",
-                )
 
                 yield Checkbox(
                     "Let the local AI read student names and IDs (never "
@@ -515,7 +508,6 @@ class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
             escalate_only=escalate_only,
             transcribe_math=self.query_one("#ai-transcribe-math", Checkbox).value,
             grade_written=self.query_one("#ai-grade-written", Checkbox).value,
-            auto_grade=self.query_one("#ai-auto-grade", Checkbox).value,
             require_calibration=self.query_one(
                 "#ai-require-calibration", Checkbox
             ).value,

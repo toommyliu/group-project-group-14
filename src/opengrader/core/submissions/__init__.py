@@ -33,6 +33,7 @@ from .review import (
     ReviewSeverity,
     build_review_flags,
     flag_missing_submissions,
+    flag_off_roster,
     flag_regrade_requests,
     flag_submission,
 )
@@ -206,6 +207,7 @@ __all__ = [
     "ReviewSeverity",
     "build_review_flags",
     "flag_missing_submissions",
+    "flag_off_roster",
     "flag_regrade_requests",
     "flag_submission",
     "RegradeRequest",

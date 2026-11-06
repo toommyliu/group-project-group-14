@@ -12,6 +12,7 @@ from PIL import Image
 
 from opengrader.core.source_location import QuestionSourceSegment
 from opengrader.core.roster import load_roster_students
+from opengrader.core.submissions.name_match import name_similarity
 from opengrader.core.pdf_utils import (
     POINTS_SPEC,
     QUESTION_PREFIX_RE,
@@ -58,6 +59,9 @@ from opengrader.core.ocr.math_ocr import (
 class ExtractionProgress:
     on_file_start: Callable[[str, int], None] | None = None
     on_response: Callable[[str, str], None] | None = None
+    # (done, total) PDFs of this extraction, AI or not: what a progress bar's
+    # percentage and time left are measured in. Called in the parent process.
+    on_files_done: Callable[[int, int], None] | None = None
 
     def file_start(self, pdf_name: str, response_count: int) -> None:
         if self.on_file_start is not None:
@@ -66,6 +70,10 @@ class ExtractionProgress:
     def response(self, pdf_name: str, question_id: str) -> None:
         if self.on_response is not None:
             self.on_response(pdf_name, question_id)
+
+    def files_done(self, done: int, total: int) -> None:
+        if self.on_files_done is not None:
+            self.on_files_done(done, total)
 
 
 _QUESTION_INLINE_RE = re.compile(
@@ -136,19 +144,27 @@ def _load_roster(path: Path) -> list[_RosterEntry]:
     ]
 
 
-def _match_roster(student_id: str, name: str, roster: list[_RosterEntry]) -> tuple[_RosterEntry, float] | None:
-    best_entry: _RosterEntry | None = None
-    best_score = 0.0
+def _id_key(student_id: str) -> str:
+    """An ID as compared: its digits when it has enough of them (OCR adds
+    spaces, dashes and a stray letter), else the text itself."""
+    digits = re.sub(r"\D", "", student_id or "")
+    return digits if len(digits) >= 4 else (student_id or "").strip().casefold()
 
-    for entry in roster:
-        id_score = SequenceMatcher(None, student_id, entry.student_id).ratio()
-        name_score = SequenceMatcher(None, name.lower(), entry.name.lower()).ratio()
-        score = (id_score * 0.7) + (name_score * 0.3)
-        if score > best_score:
-            best_score = score
-            best_entry = entry
 
-    return (best_entry, best_score) if best_entry else None
+def _combined_scores(
+    student_id: str, name: str, roster: list[_RosterEntry]
+) -> list[tuple[_RosterEntry, float]]:
+    """Every roster student scored on ID (70%) and name (30%), best first."""
+    key = _id_key(student_id)
+    scored = [
+        (
+            entry,
+            SequenceMatcher(None, key, _id_key(entry.student_id)).ratio() * 0.7
+            + name_similarity(name, entry.name).score * 0.3,
+        )
+        for entry in roster
+    ]
+    return sorted(scored, key=lambda pair: pair[1], reverse=True)
 
 
 def _has_usable_id(student_id: str) -> bool:
@@ -295,45 +311,85 @@ def resolve_student_identity(
     combined_threshold: float = 0.6,
     name_threshold: float = 0.85,
 ) -> RosterMatch:
+    """Who on the roster wrote this paper, from the ID and name read off it.
+
+    Never a guess: two students who fit about as well are `ambiguous` (the
+    caller keeps them as `id_candidates` for a person to pick), and a match
+    on only part of the name is accepted when no one else fits it, with a
+    score below the identity review floor so it is checked.
+    """
     student_id = (student_id or "").strip()
     name = (name or "").strip()
 
-    if _has_usable_id(student_id):
-        combined = _match_roster(student_id, name, roster)
-        if combined is not None and combined[1] >= combined_threshold:
-            return RosterMatch(
-                status="matched", entry=combined[0], score=combined[1]
+    if _has_usable_id(student_id) and roster:
+        key = _id_key(student_id)
+        exact = [entry for entry in roster if _id_key(entry.student_id) == key]
+        if len(exact) == 1:
+            entry = exact[0]
+            score = 0.7 + 0.3 * name_similarity(name, entry.name).score
+            return RosterMatch(status="matched", entry=entry, score=score)
+        scored = _combined_scores(student_id, name, roster)
+        best_entry, best = scored[0]
+        if best >= combined_threshold:
+            close = _distinct(
+                entry for entry, score in scored if best - score < _ID_MARGIN
             )
+            if len(close) == 1:
+                return RosterMatch(status="matched", entry=best_entry, score=best)
+            # Two students' IDs are about as near to what was read: say so,
+            # unless the name tells them apart below.
+            by_name = _match_name(name, close, name_threshold)
+            if by_name.status == "matched":
+                return by_name
+            return RosterMatch(status="ambiguous", candidates=close)
 
     if name:
-        scored = sorted(
-            (
-                (
-                    entry,
-                    SequenceMatcher(None, name.lower(), entry.name.lower()).ratio(),
-                )
-                for entry in roster
-            ),
-            key=lambda pair: pair[1],
-            reverse=True,
-        )
-        distinct: dict[str, _RosterEntry] = {}
-        best_by_id: dict[str, float] = {}
-        for entry, score in scored:
-            if score < name_threshold:
-                continue
-            distinct.setdefault(entry.student_id, entry)
-            best_by_id.setdefault(entry.student_id, score)
-        if len(distinct) == 1:
-            entry = next(iter(distinct.values()))
-            return RosterMatch(
-                status="matched", entry=entry, score=best_by_id[entry.student_id]
-            )
-        if len(distinct) > 1:
-            return RosterMatch(
-                status="ambiguous", candidates=tuple(distinct.values())
-            )
+        return _match_name(name, tuple(roster), name_threshold)
+    return RosterMatch(status="unmatched")
 
+
+# Two students whose combined scores are this close are not told apart by ID.
+_ID_MARGIN = 0.08
+# A whole-name match this far ahead of the next student wins outright.
+_NAME_MARGIN = 0.1
+# The score a partial name match is given: below the identity review floor
+# (`review.DEFAULT_IDENTITY_CONFIDENCE_FLOOR`), so the paper is flagged.
+PARTIAL_NAME_SCORE = 0.75
+
+
+def _distinct(entries) -> tuple[_RosterEntry, ...]:  # noqa: ANN001 - any iterable of entries
+    seen: dict[str, _RosterEntry] = {}
+    for entry in entries:
+        seen.setdefault(entry.student_id, entry)
+    return tuple(seen.values())
+
+
+def _match_name(
+    name: str, roster: tuple[_RosterEntry, ...], name_threshold: float
+) -> RosterMatch:
+    scored = sorted(
+        ((entry, name_similarity(name, entry.name)) for entry in roster),
+        key=lambda pair: pair[1].score,
+        reverse=True,
+    )
+    whole = [(entry, found.score) for entry, found in scored if found.score >= name_threshold]
+    if whole:
+        best_entry, best = whole[0]
+        rivals = _distinct(
+            entry
+            for entry, score in whole
+            if entry.student_id != best_entry.student_id and best - score < _NAME_MARGIN
+        )
+        if not rivals:
+            return RosterMatch(status="matched", entry=best_entry, score=best)
+        return RosterMatch(
+            status="ambiguous", candidates=_distinct([best_entry, *rivals])
+        )
+    partial = _distinct(entry for entry, found in scored if found.partial)
+    if len(partial) == 1:
+        return RosterMatch(status="matched", entry=partial[0], score=PARTIAL_NAME_SCORE)
+    if len(partial) > 1:
+        return RosterMatch(status="ambiguous", candidates=partial)
     return RosterMatch(status="unmatched")
 
 

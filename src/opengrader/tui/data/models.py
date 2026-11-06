@@ -59,7 +59,7 @@ class ReviewItem:
     @property
     def is_identity_flag(self) -> bool:
         reason = getattr(self.reason, "value", self.reason)
-        return reason in ("missing_student_id", "malformed_student_id")
+        return reason in ("missing_student_id", "malformed_student_id", "not_on_roster")
 
     @property
     def is_version_flag(self) -> bool:

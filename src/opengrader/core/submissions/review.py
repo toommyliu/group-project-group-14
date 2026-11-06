@@ -47,6 +47,9 @@ class ReviewReason(str, Enum):
     VERSION_UNKNOWN = "version_unknown"
     MISSING_STUDENT_ID = "missing_student_id"
     MALFORMED_STUDENT_ID = "malformed_student_id"
+    # A roster is known and this paper's ID is not on it: Canvas would not
+    # find the student, or the grade would reach someone else.
+    NOT_ON_ROSTER = "not_on_roster"
     MISSING_STUDENT_NAME = "missing_student_name"
     EMPTY_RESPONSE = "empty_response"
     LOW_CONFIDENCE_TRANSCRIPTION = "low_confidence_transcription"
@@ -314,6 +317,37 @@ def flag_missing_submissions(
     return flags
 
 
+def flag_off_roster(
+    roster: list[RosterStudent],
+    documents: list[StudentSubmissionDocument],
+) -> list[ReviewFlag]:
+    """Papers whose student ID is not on the roster. A paper with no ID is
+    `MISSING_STUDENT_ID` already, and an empty roster flags nothing."""
+    roster_ids = {_normalize_id(student.student_id) for student in roster}
+    roster_ids.discard("")
+    if not roster_ids:
+        return []
+    flags: list[ReviewFlag] = []
+    for document in documents:
+        student_id = document.student_id.strip()
+        if not student_id or _normalize_id(student_id) in roster_ids:
+            continue
+        flags.append(
+            ReviewFlag(
+                student_id=student_id,
+                student_name=document.student_name.strip(),
+                source_pdf=document.source_pdf,
+                reason=ReviewReason.NOT_ON_ROSTER,
+                severity="high",
+                detail=(
+                    f"Student id {student_id!r} is not on the class roster; "
+                    "match this paper to a roster student before grades are returned."
+                ),
+            )
+        )
+    return flags
+
+
 def flag_regrade_requests(
     regrade_requests: list[RegradeRequest],
     documents: list[StudentSubmissionDocument],
@@ -419,6 +453,7 @@ def build_review_flags(
             )
         )
     if roster is not None:
+        flags.extend(flag_off_roster(roster, documents))
         flags.extend(flag_missing_submissions(roster, documents))
     if regrade_requests is not None:
         flags.extend(flag_regrade_requests(regrade_requests, documents))

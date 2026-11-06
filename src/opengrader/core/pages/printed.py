@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -48,8 +49,27 @@ def _get_engine():
 
 
 def limit_threads(threads: int) -> None:
-    global _threads
-    _threads = threads
+    """Threads per onnxruntime session for the printed-text reader (-1 = all).
+
+    Takes effect on the next read: an engine built with another count is
+    dropped, since its sessions keep the thread pools they were made with."""
+    global _engine, _threads
+    with _engine_lock:
+        if threads != _threads:
+            _engine = None
+        _threads = threads
+
+
+def app_thread_budget(cpus: int | None = None) -> int:
+    """Threads per reader session inside an interactive app (TUI).
+
+    onnxruntime's default is one spinning thread per physical core for *each*
+    of the reader's sessions; run in the app's own process (Launch Grading's
+    split) that was 40+ threads at 400–700 % CPU on a 16-thread Mac and the
+    screen lagged. A quarter of the CPUs, at most 4, keeps the read fast and
+    leaves the rest of the machine to the user."""
+    cpus = cpus or os.cpu_count() or 1
+    return max(1, min(4, cpus // 4))
 
 
 def _ocr(image: Image.Image, *, detect: bool):

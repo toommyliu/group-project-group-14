@@ -132,3 +132,24 @@ def test_a_tall_handwritten_answer_beside_a_printed_line_is_not_joined_to_it():
     ]
 
     assert sorted(line.text for line in merge_lines(fragments)) == ["d) (5 pts) Which data structure uses FIFO?", "queue"]
+
+
+def test_app_thread_budget_leaves_most_cores_to_the_user():
+    from opengrader.core.pages.printed import app_thread_budget
+
+    assert [app_thread_budget(cpus) for cpus in (1, 4, 8, 16, 64)] == [1, 1, 2, 4, 4]
+
+
+def test_changing_the_thread_limit_drops_an_engine_built_with_the_old_one(monkeypatch):
+    from opengrader.core.pages import printed
+
+    monkeypatch.setattr(printed, "_threads", -1)
+    sentinel = object()
+    monkeypatch.setattr(printed, "_engine", sentinel)
+
+    printed.limit_threads(-1)
+    assert printed._engine is sentinel  # same count: keep it
+
+    printed.limit_threads(2)
+    assert printed._engine is None
+    assert printed._threads == 2

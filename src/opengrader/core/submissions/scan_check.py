@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections import Counter
+import hashlib
+import threading
+from collections import Counter, OrderedDict
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -669,6 +671,11 @@ def _upright_for_ocr(image, rotation: int):
         return image
 
 
+_REPORT_CACHE_SIZE = 8
+_report_cache: "OrderedDict[tuple, ScanReport]" = OrderedDict()
+_report_cache_lock = threading.Lock()
+
+
 def analyze_scan_pdf(
     pdf_path: str | Path,
     *,
@@ -681,11 +688,76 @@ def analyze_scan_pdf(
     dpi_floor: float = DEFAULT_DPI_FLOOR,
     progress_callback: Callable[[str], None] | None = None,
 ) -> ScanReport:
+    """Check a scan, once per process for the same bytes and settings.
+
+    A pipeline run checks the scan in its scan-check stage and the splitter
+    checks it again before cutting every N pages — the same file with the
+    same settings, every page rendered and OCR'd twice. The report depends
+    only on the file's content and these arguments, so the second call gets
+    the first one's report (keyed on a content hash, never on a path or
+    mtime, so a scan replaced in place is checked afresh)."""
+    path = Path(pdf_path)
+    key = (
+        _content_sha256(path),
+        str(path.resolve()),
+        dpi,
+        check_orientation,
+        check_page_order,
+        pages_per_submission,
+        expected_page_count,
+        single_submission,
+        dpi_floor,
+    )
+    with _report_cache_lock:
+        cached = _report_cache.get(key)
+        if cached is not None:
+            _report_cache.move_to_end(key)
+    if cached is not None:
+        if progress_callback is not None:
+            progress_callback(f"Scan already checked in this run ({cached.page_count} pages)")
+        return cached
+    report = _analyze_scan_pdf(
+        path,
+        dpi=dpi,
+        check_orientation=check_orientation,
+        check_page_order=check_page_order,
+        pages_per_submission=pages_per_submission,
+        expected_page_count=expected_page_count,
+        single_submission=single_submission,
+        dpi_floor=dpi_floor,
+        progress_callback=progress_callback,
+    )
+    with _report_cache_lock:
+        _report_cache[key] = report
+        while len(_report_cache) > _REPORT_CACHE_SIZE:
+            _report_cache.popitem(last=False)
+    return report
+
+
+def _content_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _analyze_scan_pdf(
+    path: Path,
+    *,
+    dpi: int,
+    check_orientation: bool,
+    check_page_order: bool,
+    pages_per_submission: int | None,
+    expected_page_count: int | None,
+    single_submission: bool,
+    dpi_floor: float,
+    progress_callback: Callable[[str], None] | None,
+) -> ScanReport:
     import fitz
 
     from opengrader.core.pdf_utils import render_page_to_image
 
-    path = Path(pdf_path)
     doc = fitz.open(path)
     features: list[PageScanFeatures] = []
     orientation_available = check_orientation

@@ -192,7 +192,10 @@ def _why_skipped(request: PipelineRequest, plan: StagePlan) -> str:
         return "not asked for (optional, in Settings)"
     if plan.stage == STAGE_AUTO_GRADE:
         if not request.auto_grade:
-            return "turned off in AI setup; you grade every answer yourself"
+            return (
+                'not ticked ("Auto-grade after reading the scans", in '
+                "Settings); you grade every answer yourself"
+            )
         if request.qa_file is None:
             return "waiting for an answer key"
     return "not needed this time"
@@ -207,8 +210,8 @@ def _fixes(request: PipelineRequest, plans: Sequence[StagePlan]) -> list[str]:
         )
     elif not request.auto_grade:
         fixes.append(
-            'To have answers graded automatically, tick "Grade what it can as '
-            'soon as extraction finishes" in AI setup.'
+            'To have answers graded automatically, tick "Auto-grade after '
+            'reading the scans" in Settings.'
         )
     if (
         not request.pages_per_submission

@@ -20,7 +20,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Button, Checkbox, Static
 from opengrader.tui.ui.button_roles import OutlineButtons
 
 # What a dialog can be dismissed with.
@@ -67,6 +67,9 @@ class PrepareFolderScreen(OutlineButtons, ModalScreen[str | None]):
     #prepare-folder-ai {
         color: $text-muted;
     }
+    #prepare-folder-remember {
+        margin-bottom: 1;
+    }
 
     #prepare-folder-buttons {
         height: auto;
@@ -86,10 +89,17 @@ class PrepareFolderScreen(OutlineButtons, ModalScreen[str | None]):
         actions: Sequence[tuple[str, str]],
         *,
         ai_status: str = "",
+        remember: str = "",
+        cancel_label: str = "Cancel",
     ) -> None:
         """`actions` are (action, button label) pairs, left to right; the last
-        one is the suggested choice and starts focused."""
+        one is the suggested choice and starts focused. `remember` is the label
+        of an unticked "don't ask again" box; read `remembered` once the
+        dialog is dismissed (never true for Cancel)."""
         super().__init__()
+        self._remember = remember
+        self._cancel_label = cancel_label
+        self.remembered = False
         self._title = title
         self._found = found
         self._note = note
@@ -104,8 +114,10 @@ class PrepareFolderScreen(OutlineButtons, ModalScreen[str | None]):
             yield Static(self._note, id="prepare-folder-note", markup=False)
             if self._ai_status:
                 yield Static(self._ai_status, id="prepare-folder-ai")
+            if self._remember:
+                yield Checkbox(self._remember, id="prepare-folder-remember")
             with Horizontal(id="prepare-folder-buttons"):
-                yield Button("Cancel", id=f"{_BUTTON_PREFIX}cancel")
+                yield Button(self._cancel_label, id=f"{_BUTTON_PREFIX}cancel")
                 for index, (action, label) in enumerate(self._actions):
                     last = index == len(self._actions) - 1
                     yield Button(
@@ -121,6 +133,8 @@ class PrepareFolderScreen(OutlineButtons, ModalScreen[str | None]):
     def _on_button(self, event: Button.Pressed) -> None:
         event.stop()
         action = (event.button.id or "").removeprefix(_BUTTON_PREFIX)
+        if action != "cancel" and self._remember:
+            self.remembered = self.query_one("#prepare-folder-remember", Checkbox).value
         self.dismiss(None if action == "cancel" else action)
 
     def action_cancel(self) -> None:

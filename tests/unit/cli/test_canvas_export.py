@@ -96,3 +96,59 @@ def test_canvas_export_names_a_section_nobody_is_in(
              "--section", "Section 9", "--dry-run"],
         )
     assert raised.value.code == 1
+
+
+def _papers_with_one_off_roster(tmp_path: Path) -> Path:
+    (tmp_path / "roster.tsv").write_text("1\tAda Lovelace\n")
+    folder = tmp_path / "submissions"
+    folder.mkdir()
+    for sid, name in (("1", "Ada Lovelace"), ("77", "Misread")):
+        (folder / f"s{sid}.submission.md").write_text(
+            f"---\nstudent_id: '{sid}'\nstudent_name: {name}\n---\n"
+            "- q1:\n  - Response text: Yes\n  - Possible points: 10\n  - Points: 7\n"
+        )
+    return folder
+
+
+def _record_posts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    monkeypatch.setattr(canvas_export, "_check_canvas_sak_installed", lambda: True)
+    posted: list[str] = []
+
+    def record(**kwargs):
+        posted.append(kwargs["sisid"])
+        return True, ""
+
+    monkeypatch.setattr(canvas_export, "_call_canvas_sak", record)
+    return posted
+
+
+def test_canvas_export_skips_a_paper_not_on_the_class_roster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    folder = _papers_with_one_off_roster(tmp_path)
+    posted = _record_posts(monkeypatch)
+
+    run_command(
+        canvas_export.command,
+        ["--submissions", str(folder), "--course", "C", "--assignment", "A", "--dry-run"],
+    )
+
+    assert posted == ["1"]
+    assert "not on the class roster" in capsys.readouterr().out
+
+
+def test_canvas_export_posts_off_roster_papers_when_told_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _papers_with_one_off_roster(tmp_path)
+    posted = _record_posts(monkeypatch)
+
+    run_command(
+        canvas_export.command,
+        [
+            "--submissions", str(folder), "--course", "C", "--assignment", "A",
+            "--dry-run", "--allow-off-roster",
+        ],
+    )
+
+    assert sorted(posted) == ["1", "77"]

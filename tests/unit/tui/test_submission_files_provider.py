@@ -2308,3 +2308,86 @@ def test_saving_a_transcription_keeps_or_drops_the_provider(tmp_path: Path) -> N
         response_provider="Claude",
     )
     assert "  - Read by: vision-model (Claude)\n" in submission_path.read_text()
+
+
+def _class_folder_with_roster(tmp_path: Path) -> SubmissionFilesProvider:
+    """Two papers: one on the roster, one read as an id that is not on it."""
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    (tmp_path / "roster.tsv").write_text("111111111\tStudent 1\n222222222\tStudent 2\n")
+    submissions = tmp_path / "submissions"
+    _write_simple_submissions(submissions)
+    for stem, student_id in (("student-1", "111111111"), ("student-2", "979797979")):
+        paper = submissions / f"{stem}.submission.md"
+        paper.write_text(paper.read_text().replace('student_id: "1"', f'student_id: "{student_id}"'))
+    return SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions,
+        default_image_path="",
+    )
+
+
+def test_class_roster_flags_a_paper_not_on_it(tmp_path: Path) -> None:
+    provider = _class_folder_with_roster(tmp_path)
+
+    flagged = [
+        item for item in provider.build_review_items() if item.reason.value == "not_on_roster"
+    ]
+    assert [item.student_display_id for item in flagged] == ["979797979"]
+    assert flagged[0].is_identity_flag
+    coverage = provider.roster_coverage()
+    assert (coverage.total, coverage.count) == (2, 1)
+
+
+def test_matching_the_paper_clears_the_flag_and_blocks_release_until_then(
+    tmp_path: Path,
+) -> None:
+    provider = _class_folder_with_roster(tmp_path)
+
+    def identity_blocks() -> bool:
+        return any(
+            issue.kind.value == "unresolved_identity"
+            for issue in provider.build_readiness_report().blocking
+        )
+
+    assert identity_blocks()
+
+    paper = next(
+        item for item in provider.build_review_items() if item.reason.value == "not_on_roster"
+    )
+    provider.assign_student_identity(
+        student_item_id=paper.student_item_id, student_id="222222222", student_name="Student 2"
+    )
+
+    assert not any(
+        item.reason.value == "not_on_roster" for item in provider.build_review_items()
+    )
+    assert provider.roster_coverage().count == 0
+    assert not identity_blocks()
+
+
+def test_no_class_roster_means_no_roster_flags(tmp_path: Path) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    _write_simple_submissions(tmp_path / "submissions")
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=tmp_path / "submissions",
+        default_image_path="",
+    )
+
+    assert provider.roster_students() is None
+    assert provider.roster_coverage() is None
+
+
+def test_identity_crops_are_the_papers_name_and_id_boxes(tmp_path: Path) -> None:
+    provider = _class_folder_with_roster(tmp_path)
+    paper = tmp_path / "submissions" / "student-1.submission.md"
+    (tmp_path / "submissions" / "name.png").write_bytes(b"png")
+    paper.write_text(paper.read_text().replace('student_score: ""', 'student_score: ""\nname_image: name.png'))
+    provider.reload_all()
+
+    crops, read_id = provider.identity_crops("s1")
+
+    assert crops == ((tmp_path / "submissions" / "name.png").resolve(),)
+    assert read_id == "111111111"

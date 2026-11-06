@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import fitz
@@ -309,3 +311,53 @@ def test_a_broken_pdf_fails_only_its_own_submission(tmp_path) -> None:
     report = run_extraction_batch(jobs, workers=2)
     assert [o.status for o in report.outcomes] == ["extracted", "failed"]
     assert report.failed[0].error
+
+
+_STDERR_LIKE_TEXTUAL = r"""
+import sys
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
+
+from opengrader.core.submissions.batch import _ensure_resource_tracker
+
+
+class PrintCapture:  # what Textual puts in sys.stderr while an app runs
+    def write(self, text):
+        return len(text)
+
+    def flush(self):
+        pass
+
+    def fileno(self):
+        return -1
+
+
+if __name__ == "__main__":  # spawn re-imports this script in the worker
+    capture = PrintCapture()
+    sys.stderr = capture
+    try:
+        _ensure_resource_tracker()
+        assert sys.stderr is capture
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(1, mp_context=context) as pool:
+            print(pool.submit(abs, -7).result())
+    except BaseException:
+        import traceback
+
+        traceback.print_exc(file=sys.__stderr__)
+        raise
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX resource tracker only")
+def test_spawn_pool_starts_while_stderr_has_no_file_descriptor(tmp_path):
+    # 2026-11-05: Launch Grading in classic failed at extract with
+    # "ValueError: bad value(s) in fds_to_keep" — Textual's stderr has
+    # fileno() == -1. A fresh interpreter, so no tracker is running yet.
+    script = tmp_path / "spawn_check.py"
+    script.write_text(_STDERR_LIKE_TEXTUAL)
+    result = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "7"

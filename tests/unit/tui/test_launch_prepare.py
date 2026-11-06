@@ -14,8 +14,10 @@ import opengrader.tui.ui.screens.setup_screen as setup_screen
 from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
 from opengrader.core.pipeline_settings import (
     FolderPipelineSettings,
+    MachinePipelineSettings,
     load_folder_settings,
     save_folder_settings,
+    save_machine_settings,
 )
 from opengrader.core.submissions.manifest import (
     RUN_LEDGER_FILENAME,
@@ -634,10 +636,13 @@ def test_submissions_without_a_key_ask_only_for_the_key(tmp_path, pipeline_calls
 # --- submissions read before there was an answer key -------------------------
 
 
-def _read_without_a_key(tmp_path: Path) -> Path:
+def _read_without_a_key(tmp_path: Path, *, auto_grade: bool = True) -> Path:
+    """A folder read before it had a key. `auto_grade`: the card's opt-in
+    "Auto-grade after reading the scans" is ticked on this computer."""
     folder = _class_folder(tmp_path)
     _add_submission(folder)
     _record_stage(folder, "extract")
+    save_machine_settings(MachinePipelineSettings(auto_grade=auto_grade))
     return folder
 
 
@@ -679,6 +684,23 @@ def test_declining_auto_grading_opens_the_folder_and_is_not_asked_twice(
     pair = (str(folder / "qa.md"), str(folder / "submissions"))
     assert launched == [pair, pair]
     assert no_second_dialog
+    assert pipeline_calls == []
+
+
+def test_without_opting_into_auto_grading_the_folder_just_opens(
+    tmp_path, pipeline_calls  # noqa: ANN001
+) -> None:
+    folder = _read_without_a_key(tmp_path, auto_grade=False)
+
+    async def steps(session: _Session):  # noqa: ANN202
+        await session.launch(folder)
+        await session.pilot.pause()
+        return session.launched, _dialog(session.app) is None
+
+    launched, no_dialog = _drive(steps)
+
+    assert launched == [(str(folder / "qa.md"), str(folder / "submissions"))]
+    assert no_dialog
     assert pipeline_calls == []
 
 
@@ -862,7 +884,7 @@ def browser_opens(monkeypatch) -> list[tuple[str, str]]:  # noqa: ANN001
     monkeypatch.setattr(
         setup_screen.BrowserLauncher,
         "open_folder",
-        lambda _self, qa, subs: opened.append((str(qa), str(subs))),
+        lambda _self, qa, subs, *, page="": opened.append((str(qa), str(subs))),
     )
     return opened
 

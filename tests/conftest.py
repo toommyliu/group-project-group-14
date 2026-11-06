@@ -81,3 +81,14 @@ def copy_cs146_sample():
 def pydantic_ai_available(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise provider wiring without installing or calling the optional SDK."""
     monkeypatch.setattr(app_config.manifests, "_pydantic_ai_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_scan_report_cache():
+    # analyze_scan_pdf keeps a per-process report for each scan it checked;
+    # a test that patches the OCR must not get another test's report.
+    from opengrader.core.submissions import scan_check
+
+    scan_check._report_cache.clear()
+    yield
+    scan_check._report_cache.clear()

@@ -452,7 +452,10 @@ class AISettings:
     escalate_only: bool | None = None
     transcribe_math: bool = False
     grade_written: bool = False
-    auto_grade: bool = True
+    # (`auto_grade` moved to the pipeline card's own settings,
+    # `pipeline_settings.MachinePipelineSettings.auto_grade`: it scores by the
+    # answer key's rules, no AI. An old config.json that still has it loads;
+    # the next save drops it.)
     require_calibration: bool = False
     min_confidence_measured: bool = False
     # Whether a LOCAL AI model may read a student's name or ID off a crop.
@@ -485,7 +488,6 @@ class AISettings:
             "escalate_only",
             "transcribe_math",
             "grade_written",
-            "auto_grade",
             "require_calibration",
             "min_confidence_measured",
             "read_identity_locally",
@@ -513,7 +515,6 @@ class AISettings:
             escalate_only=_as_optional_bool(data.get("escalate_only")),
             transcribe_math=_as_bool(data.get("transcribe_math"), False),
             grade_written=_as_bool(data.get("grade_written"), False),
-            auto_grade=_as_bool(data.get("auto_grade"), True),
             require_calibration=_as_bool(data.get("require_calibration"), False),
             min_confidence_measured=_as_bool(
                 data.get("min_confidence_measured"), False
@@ -653,7 +654,6 @@ class ResolvedAI:
     escalate_only: bool
     transcribe_math: bool
     grade_written: bool
-    auto_grade: bool
     require_calibration: bool
     read_identity_locally: bool
     settings: AISettings = field(repr=False, default_factory=AISettings)
@@ -1046,7 +1046,6 @@ def resolve(
         escalate_only=escalate and base.read_handwriting,
         transcribe_math=base.transcribe_math and base.read_handwriting,
         grade_written=base.grade_written,
-        auto_grade=base.auto_grade,
         require_calibration=base.require_calibration,
         read_identity_locally=base.read_identity_locally,
         settings=base,

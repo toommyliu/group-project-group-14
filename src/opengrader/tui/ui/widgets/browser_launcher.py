@@ -120,11 +120,23 @@ class BrowserLauncher(Vertical):
 
     # -- opening ---------------------------------------------------------
 
-    def open_folder(self, qa_path: str | Path, submissions_path: str | Path) -> None:
-        """What *Open in browser* does with the card's answer key + submissions."""
+    def open_folder(
+        self,
+        qa_path: str | Path,
+        submissions_path: str | Path,
+        *,
+        page: str = "",
+    ) -> None:
+        """What *Open in browser* does with the card's answer key + submissions.
+
+        `page` is a path under the assignment to open instead of its front
+        page, e.g. `submissions?show=attention` to match papers to the roster.
+        Whether that is a folder session or a shared workspace the folder is
+        part of is `import_folder`'s to tell; the page is the same in both.
+        """
         self._when_web_app_ready(
             lambda build, brew: self._open_worker(
-                str(qa_path), str(submissions_path), build, brew
+                str(qa_path), str(submissions_path), build, brew, page
             )
         )
 
@@ -263,6 +275,7 @@ class BrowserLauncher(Vertical):
         submissions_path: str,
         build: bool,
         install_with: str | None = None,
+        subpage: str = "",
     ) -> None:
         """`install_with` is Homebrew's path when Node.js goes in first."""
         app = self.app
@@ -302,6 +315,8 @@ class BrowserLauncher(Vertical):
         record_class_folder(qa_path, submissions_path)
         self._remember(root, assignment_id)
         page = f"{connection.url}/assignments/{assignment_id}"
+        if subpage:
+            page = f"{page}/{subpage}"
         opened = self._open_url(page)
         app.call_from_thread(
             self._show_running, root, connection.url, page, opened, folder_session
@@ -380,15 +395,7 @@ class BrowserLauncher(Vertical):
 
     @staticmethod
     def _open_url(url: str) -> bool:
-        # Over SSH the browser that would open is the server's, not the user's.
-        if os.environ.get("SSH_CONNECTION"):
-            return False
-        import webbrowser
-
-        try:
-            return bool(webbrowser.open(url))
-        except webbrowser.Error:
-            return False
+        return open_url(url)
 
     # -- status line -----------------------------------------------------
 
@@ -540,6 +547,19 @@ class BrowserLauncher(Vertical):
             self._show(url)
         elif self._url:
             self._hide()
+
+
+def open_url(url: str) -> bool:
+    """Open `url` in this computer's browser; False when none opened."""
+    # Over SSH the browser that would open is the server's, not the user's.
+    if os.environ.get("SSH_CONNECTION"):
+        return False
+    import webbrowser
+
+    try:
+        return bool(webbrowser.open(url))
+    except webbrowser.Error:
+        return False
 
 
 def folder_root(qa_path: str | Path, submissions_path: str | Path) -> Path:

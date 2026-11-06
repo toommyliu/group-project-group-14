@@ -275,6 +275,24 @@ def _print_egress_summary(report: PipelineReport) -> None:
         print(f"  estimated cost: could not be estimated ({basis})")
 
 
+def _print_roster_coverage(report: PipelineReport) -> None:
+    """Say how many papers are not matched to the class roster, and where to
+    match them. Never a question: this command also runs from scripts."""
+    from opengrader.core.submissions.roster_check import folder_roster_coverage
+
+    try:
+        coverage = folder_roster_coverage(report.submissions_dir, report.qa_file)
+    except Exception:  # noqa: BLE001 - a hint, never a reason to fail the run
+        return
+    if coverage is None or not coverage.count:
+        return
+    print(
+        f"\n{coverage.summary()} Match them before grades are returned:\n"
+        "  in the terminal app: open the folder, press shift+R, choose a paper\n"
+        "  in the browser app:  the assignment's Submissions page, Needs attention"
+    )
+
+
 def _print_summary(report: PipelineReport) -> None:
     print("\nSummary")
     for outcome in report.stages:
@@ -293,6 +311,7 @@ def _print_summary(report: PipelineReport) -> None:
             f"\n{report.submission_count} submission(s) ready in "
             f"{report.submissions_dir}"
         )
+        _print_roster_coverage(report)
 
     if report.cloud_confirmation_needed:
         # The pre-flight statement and how to confirm were already printed
@@ -686,6 +705,13 @@ def _resolve_ai_unavailable(
     return report
 
 
+def _saved_auto_grade() -> bool:
+    """The card's opt-in "Auto-grade after reading the scans", for this computer."""
+    from opengrader.core.pipeline_settings import load_machine_settings
+
+    return load_machine_settings().auto_grade
+
+
 def _run_pipeline(
     request: PipelineRequest, narrator: "_Narrator", *, as_json: bool
 ) -> PipelineReport:
@@ -989,10 +1015,12 @@ def _save_inputs(
 )
 @click.option(
     "--auto-grade/--no-auto-grade",
-    default=ai_default("auto_grade"),
-    show_default="from AI Setup",
+    default=lambda: _saved_auto_grade(),
+    show_default="off, unless ticked on the Prepare an assignment card",
     help=(
-        "Run the auto-grade stage automatically once extraction finishes. "
+        "Score what the answer key settles outright once extraction "
+        "finishes. Opt-in: the default is the card's \"Auto-grade after "
+        "reading the scans\" box, saved for this computer. "
         "--no-auto-grade: extract only; leave every answer for the TUI."
     ),
 )

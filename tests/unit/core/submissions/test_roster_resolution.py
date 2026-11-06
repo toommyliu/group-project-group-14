@@ -200,3 +200,78 @@ def test_apply_section_blank_id_in_mixed_mode_is_unassigned() -> None:
 def test_apply_section_noop_when_no_routing() -> None:
     updated = _apply_section(_doc("Tommy Liu", "111111111"), None, None, lambda _m: None)
     assert updated.section is None
+
+
+# -- what handwriting read by OCR looks like ----------------------------------
+
+CLASS = [
+    _RosterEntry(student_id="111111111", name="Tommy Liu"),
+    _RosterEntry(student_id="222222222", name="Andrew Cortes"),
+    _RosterEntry(student_id="555555555", name="Amy Liu"),
+    _RosterEntry(student_id="666666666", name="Tommy Smith"),
+]
+
+
+def test_last_name_first_matches() -> None:
+    result = resolve_student_identity("", "Liu, Tommy", CLASS)
+    assert result.status == "matched"
+    assert result.entry.student_id == "111111111"
+
+
+def test_ocr_digits_for_letters_match() -> None:
+    result = resolve_student_identity("", "T0mmy L1u", CLASS)
+    assert result.status == "matched"
+    assert result.entry.student_id == "111111111"
+
+
+def test_unique_partial_name_matches_below_the_review_floor() -> None:
+    from opengrader.core.submissions.review import DEFAULT_IDENTITY_CONFIDENCE_FLOOR
+
+    result = resolve_student_identity("", "Andy Cortes", CLASS)
+    assert result.status == "matched"
+    assert result.entry.student_id == "222222222"
+    # Flagged for a person to confirm, never trusted like a whole name.
+    assert result.score * 100 < DEFAULT_IDENTITY_CONFIDENCE_FLOOR
+
+
+def test_partial_name_shared_by_two_students_is_ambiguous() -> None:
+    result = resolve_student_identity("", "Liu", CLASS)
+    assert result.status == "ambiguous"
+    assert {c.student_id for c in result.candidates} == {"111111111", "555555555"}
+    result = resolve_student_identity("", "Tommy", CLASS)
+    assert result.status == "ambiguous"
+    assert {c.student_id for c in result.candidates} == {"111111111", "666666666"}
+
+
+def test_whole_name_beats_a_partial_one() -> None:
+    roster = [*CLASS, _RosterEntry(student_id="777777777", name="Andy Cortes")]
+    result = resolve_student_identity("", "Andy Cortes", roster)
+    assert result.status == "matched"
+    assert result.entry.student_id == "777777777"
+
+
+def test_id_with_spaces_and_dashes_matches_exactly() -> None:
+    result = resolve_student_identity("111-111 111", "", CLASS)
+    assert result.status == "matched"
+    assert result.entry.student_id == "111111111"
+
+
+def test_two_ids_about_as_near_are_not_guessed() -> None:
+    roster = [
+        _RosterEntry(student_id="123456780", name="Ana Park"),
+        _RosterEntry(student_id="123456781", name="Ben Ortiz"),
+    ]
+    # One digit misread, and no name to tell them apart.
+    result = resolve_student_identity("123456789", "", roster)
+    assert result.status == "ambiguous"
+    assert {c.student_id for c in result.candidates} == {"123456780", "123456781"}
+
+
+def test_near_ids_are_told_apart_by_the_name() -> None:
+    roster = [
+        _RosterEntry(student_id="123456780", name="Ana Park"),
+        _RosterEntry(student_id="123456781", name="Ben Ortiz"),
+    ]
+    result = resolve_student_identity("123456789", "Ben Ortiz", roster)
+    assert result.status == "matched"
+    assert result.entry.student_id == "123456781"

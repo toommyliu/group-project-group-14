@@ -340,7 +340,6 @@ def test_deliberate_feature_choices_round_trip() -> None:
         escalate_only=True,
         transcribe_math=True,
         grade_written=True,
-        auto_grade=False,
         require_calibration=True,
         min_confidence_measured=True,
     )
@@ -354,7 +353,6 @@ def test_deliberate_feature_choices_round_trip() -> None:
         "escalate_only": True,
         "transcribe_math": True,
         "grade_written": True,
-        "auto_grade": False,
         "require_calibration": True,
         "min_confidence_measured": True,
     }
@@ -383,16 +381,13 @@ def test_from_dict_coerces_each_bool_toggle_falling_back_to_false(
     assert getattr(settings, field_name) is expected
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [(True, True), (False, False), ("yes", True), ("garbage", True)],
-)
-def test_from_dict_auto_grade_falls_back_to_true_on_rubbish(
-    raw: object, expected: bool
-) -> None:
-    settings = app_config.AISettings.from_dict({"auto_grade": raw})
+def test_an_old_config_with_auto_grade_still_loads_and_the_next_save_drops_it() -> None:
+    # auto_grade moved to the pipeline card's settings (pipeline.json).
+    settings = app_config.AISettings.from_dict({"auto_grade": False, "grade_written": True})
 
-    assert settings.auto_grade is expected
+    assert settings.grade_written is True
+    assert not hasattr(settings, "auto_grade")
+    assert "auto_grade" not in settings.to_dict()
 
 
 @pytest.mark.parametrize(

@@ -1723,6 +1723,8 @@ def command(
 
     if skipped:
         emit(f"Resuming: {len(skipped)} already extracted, {len(jobs)} to do")
+    if jobs:
+        extraction_progress.files_done(0, len(jobs))
 
     if resolve_ambiguous is not None:
         workers = 1
@@ -1760,6 +1762,7 @@ def command(
 
     def report_outcome(outcome: ExtractionOutcome) -> None:
         completed["count"] += 1
+        extraction_progress.files_done(completed["count"], len(jobs))
         position = f"[{completed['count']}/{len(jobs)}]"
         if outcome.status == "failed":
             emit(f"{position} {outcome.pdf_path.name}: FAILED — {outcome.error}")

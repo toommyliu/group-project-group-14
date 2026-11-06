@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Literal, Sequence
 
 if TYPE_CHECKING:
+    from opengrader.core.roster import RosterStudent
     from opengrader.core.workspace.store import Workspace
 
 from opengrader.core.claims import WorkClaim
@@ -188,6 +189,7 @@ def build_readiness_report(
     identity_flags = [
         *by_reason.get(ReviewReason.MISSING_STUDENT_ID, ()),
         *by_reason.get(ReviewReason.MALFORMED_STUDENT_ID, ()),
+        *by_reason.get(ReviewReason.NOT_ON_ROSTER, ()),
     ]
     if identity_flags:
         students = {flag.student_id or flag.source_pdf for flag in identity_flags}
@@ -197,7 +199,7 @@ def build_readiness_report(
                 severity="blocking",
                 summary=(
                     f"{len(students)} {_plural(len(students), 'submission')} "
-                    "with a missing or unreadable student id."
+                    "with a missing or unreadable student id, or one not on the roster."
                 ),
                 detail="Resolve them in the review queue before releasing.",
                 count=len(students),
@@ -896,8 +898,16 @@ def load_workspace_release_context(
         workspace.document(assignment_id, item.id)
         for item in workspace.submissions(assignment_id)
     ]
+    roster = None
+    if roster_path is None:
+        # No roster file: the workspace's own (the browser's People page).
+        from opengrader.core.roster import RosterStudent
+        from opengrader.core.workspace import roster as workspace_roster
+
+        students = workspace_roster.students(workspace)
+        roster = [RosterStudent(student.sid, student.name) for student in students] or None
     return _release_context_from_documents(
-        base, documents, roster_path=roster_path, unreadable=()
+        base, documents, roster_path=roster_path, unreadable=(), roster=roster
     )
 
 
@@ -907,7 +917,11 @@ def _release_context_from_documents(
     *,
     roster_path: str | Path | None,
     unreadable: tuple[str, ...],
+    roster: "list[RosterStudent] | None" = None,
 ) -> ReleaseContext:
+    """`roster_path` is the roster to check against; without one (and no
+    `roster` given) it is the class folder's (`roster_check.find_class_roster`),
+    so a paper not matched to it is held back as an unresolved identity."""
     from opengrader.core.analytics.rubric_drift import detect_rubric_drift
     from opengrader.core.claims import read_claims
     from opengrader.core.curve import read_curve
@@ -917,12 +931,19 @@ def _release_context_from_documents(
     from opengrader.core.submissions.regrade import read_regrade_requests
     from opengrader.core.submissions.review import build_review_flags
 
-    roster = None
     if roster_path is not None:
         try:
             roster = load_roster_students(Path(roster_path))
         except (OSError, ValueError):
             roster = None
+    elif roster is None:
+        from opengrader.core.submissions.roster_check import (
+            find_class_roster,
+            load_class_roster,
+        )
+
+        found = find_class_roster(base)
+        roster = load_class_roster(found[1]) if found is not None else None
 
     curve = read_curve(base)
     previous = latest_release(base)

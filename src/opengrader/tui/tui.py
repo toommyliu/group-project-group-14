@@ -138,6 +138,11 @@ class TuiApp(App[Literal["switch_assignment"]]):
         workspace's assignment list again.
         """
         super().__init__()
+        # Pipeline steps run on a thread of this process, beside the UI: keep
+        # the text reader from taking every core (and the screen with it).
+        from opengrader.core.pages.printed import app_thread_budget, limit_threads
+
+        limit_threads(app_thread_budget())
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
         self.workflow_state = TuiWorkflowState()
         self.data_provider = data_provider or self._build_data_provider(
@@ -193,6 +198,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
             if submissions_path is not None:
                 self._start_extraction_watch(submissions_path, known_active=None)
                 self._warn_if_not_writable()
+                self.offer_roster_matching()
         if not self.has_tools_page:  # a workspace session: follow its events
             provider = self.data_provider
 
@@ -208,6 +214,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
             )
             self.set_interval(0.1, self._refresh_workspace)
             self.run_worker(self._announce_workspace_role, thread=True, group="workspace-role")
+            self.offer_roster_matching()
         self._show_session_on_tools_page()
         if self.workflow_state.current_page == PAGE_SETUP:
             # Classic with nothing open: land on the recent folders (or the
@@ -419,7 +426,115 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self._remember_folder()
         self._warn_if_shared_workspace(submissions_path)
         self._warn_if_not_writable()
+        if known_active is None or not known_active():
+            # Not while extraction is still adding papers: the count would be wrong.
+            self.offer_roster_matching()
         return True
+
+    # -- matching papers to the roster --------------------------------------
+
+    def offer_roster_matching(self) -> None:
+        """Ask whether to match papers now when some are not on the roster.
+
+        Classic reads the files here; a workspace session asks its service,
+        off the app's thread.
+        """
+        coverage_of = getattr(self.data_provider, "roster_coverage", None)
+        if not callable(coverage_of):
+            return
+        if self.has_tools_page:
+            try:
+                coverage = coverage_of()
+            except Exception:  # noqa: BLE001 - a check, never in the way of grading
+                return
+            self._prompt_roster_matching(coverage)
+            return
+
+        def check() -> None:
+            try:
+                coverage = coverage_of()
+            except Exception:  # noqa: BLE001 - as above
+                return
+            self.call_from_thread(self._prompt_roster_matching, coverage)
+
+        self.run_worker(check, thread=True, group="roster-coverage")
+
+    def _browser_match_hint(self) -> str | None:
+        """What *Match in browser* opens in this mode, or None when it is not
+        offered: classic opens the browser app only once it is turned on in
+        Tools, and never creates a workspace otherwise."""
+        if not self.has_tools_page:
+            return (
+                "Match in browser opens this assignment's Submissions page, on "
+                "the papers that need a student."
+            )
+        from opengrader.core import browser_app
+        from opengrader.core.workspace.folder_session import shared_workspace_for
+
+        if not browser_app.load_browser_preferences().enabled:
+            return None
+        if shared_workspace_for(self.data_provider.submissions_path) is not None:
+            return (
+                "Match in browser opens the shared workspace this folder is in; "
+                "names picked there stay in the workspace until written back (W)."
+            )
+        return (
+            "Match in browser opens this class folder in the browser app, with "
+            "each paper's name and ID boxes; every pick is saved to the paper's file."
+        )
+
+    def _prompt_roster_matching(self, coverage: object) -> None:
+        if coverage is None or not getattr(coverage, "count", 0):
+            return
+        browser_hint = self._browser_match_hint()
+        here_hint = None
+        if self.has_tools_page:
+            here_hint = "Match here steps through each paper in this window."
+            if browser_hint is None:
+                here_hint += (
+                    " (To match in the browser instead, turn the browser app on in Tools.)"
+                )
+
+        def chosen(choice: str | None) -> None:
+            from opengrader.tui.ui.screens.match_roster_screen import (
+                MATCH_HERE,
+                MATCH_IN_BROWSER,
+            )
+
+            if choice == MATCH_HERE:
+                papers = [item.student_item_id for item in self._identity_items()]
+                self._match_papers(papers, back_to_queue=False)
+            elif choice == MATCH_IN_BROWSER:
+                self._match_in_browser()
+
+        from opengrader.tui.ui.screens.match_roster_screen import MatchRosterPrompt
+
+        self.push_screen(
+            MatchRosterPrompt(
+                coverage.summary(), browser_hint=browser_hint, here_hint=here_hint
+            ),
+            chosen,
+        )
+
+    def _match_in_browser(self) -> None:
+        """Open the Submissions page on the papers needing a student: this
+        folder through the browser app in classic (a folder session, or the
+        shared workspace it is in), the running service in a workspace session."""
+        from opengrader.tui.ui.widgets.browser_launcher import BrowserLauncher, open_url
+
+        provider = self.data_provider
+        if not self.has_tools_page:
+            url = provider.match_page_url()
+            if not open_url(url):
+                self.notify(f"Open {url} in a browser on this computer.", timeout=30)
+            return
+        launcher = self.get_setup_screen().query_one(BrowserLauncher)
+        launcher.open_folder(
+            provider.qa_file_path,
+            provider.submissions_path,
+            page="submissions?show=attention",
+        )
+        self.notify("Opening the browser app on the papers that need a student…")
 
     def _warn_if_not_writable(self) -> None:
         """Say at once when this account cannot save grades in the folder,
@@ -1002,21 +1117,96 @@ class TuiApp(App[Literal["switch_assignment"]]):
         return callable(getattr(self.data_provider, "assign_student_identity", None))
 
     def _resolve_identity(self, item: object) -> None:
-        def _after(result: object) -> None:
-            if result is not None:
+        """Match the chosen paper, then each other unmatched one in turn."""
+        first = getattr(item, "student_item_id", "")
+        rest = [
+            other.student_item_id
+            for other in self._identity_items()
+            if other.student_item_id != first
+        ]
+        self._match_papers([first, *rest], back_to_queue=True)
+
+    def _identity_items(self) -> list[object]:
+        """One review item per paper whose student is not settled, in queue order."""
+        build_items = getattr(self.data_provider, "build_review_items", None)
+        items = build_items() if callable(build_items) else []
+        seen: set[str] = set()
+        papers = []
+        for item in items:
+            if not getattr(item, "is_identity_flag", False):
+                continue
+            if not item.student_item_id or item.student_item_id in seen:
+                continue
+            seen.add(item.student_item_id)
+            papers.append(item)
+        return papers
+
+    def _match_papers(self, paper_ids: list[str], *, back_to_queue: bool) -> None:
+        """Step through `paper_ids` with the match dialog: each pick is saved
+        to the paper's file at once; Skip leaves one, Stop ends the round."""
+        from opengrader.tui.ui.screens.review_queue_screen import SKIP_PAPER
+
+        provider = self.data_provider
+        roster = getattr(provider, "roster_students", lambda: None)() or ()
+        total = len(paper_ids)
+        state = {"index": 0, "matched": 0}
+
+        def finish() -> None:
+            left = len(self._identity_items())
+            if state["matched"]:
+                self.notify(
+                    f"Matched {state['matched']} paper(s)."
+                    + (f" {left} still need a student." if left else " Every paper has a student.")
+                )
+            self.grade_controller.refresh_after_external_change()
+            if back_to_queue:
+                self._show_review_queue()
+
+        def show_next() -> None:
+            while state["index"] < total:
+                paper = paper_ids[state["index"]]
+                state["index"] += 1
+                # Fresh, so a paper settled meanwhile (or by an earlier pick) is passed over.
+                current = next(
+                    (item for item in self._identity_items() if item.student_item_id == paper),
+                    None,
+                )
+                if current is None:
+                    continue
+                crops, read_id = getattr(
+                    provider, "identity_crops", lambda _paper: ((), "")
+                )(paper)
+                self.push_screen(
+                    AssignIdentityScreen(
+                        current,
+                        roster=roster,
+                        crops=crops,
+                        read_id=read_id,
+                        position=(state["index"], total) if total > 1 else None,
+                    ),
+                    lambda result, paper=paper: after(paper, result),
+                )
+                return
+            finish()
+
+        def after(paper: str, result: object) -> None:
+            if result is None:
+                finish()
+                return
+            if result != SKIP_PAPER:
                 student_id, student_name = result
                 try:
-                    self.data_provider.assign_student_identity(
-                        student_item_id=getattr(item, "student_item_id", ""),
+                    provider.assign_student_identity(
+                        student_item_id=paper,
                         student_id=student_id,
                         student_name=student_name,
                     )
-                    self.notify(f"Assigned student ID {student_id}.")
-                except Exception as exc:
+                    state["matched"] += 1
+                except Exception as exc:  # noqa: BLE001 - shown, the round goes on
                     self.notify(f"Could not assign ID: {exc}", severity="error")
-            self._show_review_queue()
+            show_next()
 
-        self.push_screen(AssignIdentityScreen(item), _after)
+        show_next()
 
     def _resolve_version(self, item: object) -> None:
         from opengrader.tui.ui.screens.review_queue_screen import LOOK_AT_PAPER

@@ -48,6 +48,15 @@ from opengrader.core.pipeline import (
     run_pipeline,
 )
 from opengrader.core.pipeline_settings import (
+    AI_HELP_AI_SETUP,
+    AI_HELP_ASK,
+    AI_HELP_ASSISTANT,
+    AI_HELP_CHOICES,
+    RUN_ASK,
+    RUN_CHOICES,
+    RUN_GRADE_ASAP,
+    RUN_GRADE_AT_END,
+    RUN_ONLY,
     FolderPipelineSettings,
     load_folder_settings,
     load_machine_settings,
@@ -140,6 +149,34 @@ _PIPE_STAGE_LABELS = {
     STAGE_DRAFT_RUBRICS: "Drafting rubric items",
     STAGE_AUTO_GRADE: "Auto-grading",
 }
+
+# Run Pipeline's question: when grading opens, if at all. Each answer is a
+# button in the question and a choice under Settings (`#pipe-run-<answer>`).
+_RUN_GRADE_ASAP = RUN_GRADE_ASAP
+_RUN_GRADE_AT_END = RUN_GRADE_AT_END
+_RUN_ONLY = RUN_ONLY
+_RUN_CHOICE_LABELS = (
+    (RUN_ASK, "Ask every time"),
+    (RUN_GRADE_ASAP, "Grade as submissions arrive"),
+    (RUN_GRADE_AT_END, "Grade when the run finishes"),
+    (RUN_ONLY, "Just run it — don't open grading"),
+)
+
+
+def _run_choice_id(choice: str) -> str:
+    return f"pipe-run-{choice or 'ask'}"
+
+
+# "Get help from AI": ask, or the remembered answer (`#pipe-ai-help-<answer>`).
+_AI_HELP_LABELS = (
+    (AI_HELP_ASK, "Ask each time"),
+    (AI_HELP_ASSISTANT, "My AI assistant, after each run"),
+    (AI_HELP_AI_SETUP, "Go straight to AI setup"),
+)
+
+
+def _ai_help_id(choice: str) -> str:
+    return f"pipe-ai-help-{choice or 'ask'}"
 
 # Names tried, in order, for an answer key Create answer key is about to write.
 # Under "How to split the scan", keyed by whether it is cut every N pages.
@@ -341,6 +378,7 @@ class SetupScreen(OutlineButtons, Vertical):
         margin-left: 1;
     }
 
+    SetupScreen #pipe-auto-grade-ai-area,
     SetupScreen #pipe-parallel-options,
     SetupScreen #pipe-region-map-area,
     SetupScreen #pipe-rosters-area,
@@ -656,16 +694,56 @@ class SetupScreen(OutlineButtons, Vertical):
                         )
 
                         yield Checkbox(
-                            "Start grading as submissions arrive",
-                            id="pipe-grade-asap",
-                            value=True,
+                            "Auto-grade after reading the scans",
+                            id="pipe-auto-grade",
+                            value=False,
                         )
                         yield Static(
-                            "On: opens the grading workspace the moment the first "
-                            "submission is ready, while the rest keep extracting "
-                            "behind it. Off: waits for the whole run to finish "
-                            "first. Either way, opening "
-                            "automatically needs an answer key.",
+                            "Scores every answer the answer key settles outright "
+                            "(exact matches, multiple choice, numbers), so you "
+                            "grade only the rest. Saved for this computer: once "
+                            "ticked, every folder you prepare is auto-graded. AI "
+                            "grading of written answers is set in AI setup.",
+                            classes="card-hint",
+                        )
+                        with Vertical(id="pipe-auto-grade-ai-area", classes="hidden"):
+                            yield Static("", id="pipe-auto-grade-ai", classes="card-hint")
+                            yield self._card_actions(
+                                Button(
+                                    "Get help from AI…",
+                                    id="pipe-ai-help",
+                                    classes=button_roles.OPEN,
+                                    compact=True,
+                                )
+                            )
+                            yield self._field_label("Get help from AI")
+                            with RadioSet(id="pipe-ai-help-choice"):
+                                for choice, label in _AI_HELP_LABELS:
+                                    yield RadioButton(
+                                        label,
+                                        value=choice == AI_HELP_ASK,
+                                        id=_ai_help_id(choice),
+                                    )
+                            yield Static(
+                                "My AI assistant: when a run finishes with answers "
+                                "left for you, its make-a-copy screen opens so it "
+                                "can read the handwriting and suggest grades.",
+                                classes="card-hint",
+                            )
+
+                        yield self._field_label("When Run Pipeline is pressed")
+                        with RadioSet(id="pipe-run-choice"):
+                            for choice, label in _RUN_CHOICE_LABELS:
+                                yield RadioButton(
+                                    label,
+                                    value=choice == RUN_ASK,
+                                    id=_run_choice_id(choice),
+                                )
+                        yield Static(
+                            "Ask every time shows the question when you press "
+                            "Run Pipeline. Ticking \"Remember my choice\" there "
+                            "picks one of the others; pick Ask every time to "
+                            "see the question again.",
                             classes="card-hint",
                         )
 
@@ -1655,6 +1733,8 @@ class SetupScreen(OutlineButtons, Vertical):
             self.query_one("#pipe-scans-area").set_class(not event.value, "hidden")
         elif event.checkbox.id == "pipe-parallel":
             self.query_one("#pipe-parallel-options").set_class(not event.value, "hidden")
+        elif event.checkbox.id == "pipe-auto-grade":
+            self._refresh_auto_grade_ai()
         elif event.checkbox.id == "browser-enabled":
             self._set_browser_enabled(event.value)
 
@@ -1775,7 +1855,9 @@ class SetupScreen(OutlineButtons, Vertical):
         elif event.button.id == "run-region-map":
             self._open_region_map()
         elif event.button.id == "pipe-run":
-            self._run_pipeline()
+            self._ask_how_to_run()
+        elif event.button.id == "pipe-ai-help":
+            self._offer_ai_help()
         elif event.button.id == "pipe-preview":
             self._run_pipeline_preview()
 
@@ -2073,17 +2155,11 @@ class SetupScreen(OutlineButtons, Vertical):
                 else "does not read handwriting"
             )
             grading = (
-                "suggests grades for written answers"
+                "suggests grades for answers the key can't settle"
                 if current.grade_written
-                else "does not grade written answers"
+                else "does not grade answers the key can't settle"
             )
-            auto_grade = (
-                "auto-grade runs automatically once extraction finishes"
-                if current.auto_grade
-                else "auto-grade is turned off — turn it on in AI setup and "
-                "run again to score what your rubric settles outright"
-            )
-            body = f"AI: {handwriting}, {grading}, and {auto_grade}."
+            body = f"AI: {handwriting}, and {grading}."
         else:
             raise ValueError(f"unknown AI status step {step!r}")
 
@@ -2096,6 +2172,7 @@ class SetupScreen(OutlineButtons, Vertical):
         self.query_one("#refine-ai-status", Static).update(self._ai_status_text("ext"))
         self.query_one("#ak-ai-status", Static).update(self._ai_status_text("ak"))
         self.query_one("#pipe-ai-status", Static).update(self._ai_status_text("pipe"))
+        self._refresh_auto_grade_ai()
         # Avoid importing TuiApp here — it would import this module back in.
         refresh_banner = getattr(self.app, "refresh_ai_banner", None)
         if refresh_banner is not None:
@@ -2453,8 +2530,12 @@ class SetupScreen(OutlineButtons, Vertical):
         else:
             # `opengrader run` may have asked how to split, and nothing else.
             choice = load_split_choice(folder)
-            if choice is not None:
-                self._set_fixed_split(choice)
+            if choice is None:
+                # Never chosen: a blank template in the folder says how long
+                # every paper is, so cut the scan every N pages (N left blank
+                # is the template's length) — when that length can be read.
+                choice = self._template_pages() is not None
+            self._set_fixed_split(choice)
         self._refresh_pages_placeholder()
 
     def _apply_folder_settings(self, saved: FolderPipelineSettings) -> None:
@@ -2586,7 +2667,11 @@ class SetupScreen(OutlineButtons, Vertical):
 
     def _restore_machine_settings(self) -> None:
         saved = load_machine_settings()
-        self.query_one("#pipe-grade-asap", Checkbox).value = saved.grade_as_ready
+        self._grade_as_ready = saved.grade_as_ready
+        self.query_one("#pipe-auto-grade", Checkbox).value = saved.auto_grade
+        self._set_run_choice(saved.run_choice)
+        self._set_ai_help_choice(saved.ai_help_choice)
+        self._refresh_auto_grade_ai()
         if saved.jobs:
             self.query_one("#pipe-jobs", Input).value = str(saved.jobs)
             self.query_one("#pipe-parallel", Checkbox).value = True
@@ -2608,7 +2693,10 @@ class SetupScreen(OutlineButtons, Vertical):
             save_machine_settings(
                 replace(
                     load_machine_settings(),
-                    grade_as_ready=self.query_one("#pipe-grade-asap", Checkbox).value,
+                    grade_as_ready=self._remembered_grade_as_ready(),
+                    auto_grade=self.query_one("#pipe-auto-grade", Checkbox).value,
+                    run_choice=self._run_choice(),
+                    ai_help_choice=self._ai_help_choice(),
                     jobs=request.jobs,
                     last_class_folder=str(request.output_dir),
                 )
@@ -2989,7 +3077,7 @@ class SetupScreen(OutlineButtons, Vertical):
         """Open a ready folder where the press that started this asked for it:
         the grade screen (Launch Grading) or the browser app (Open in browser)."""
         if getattr(self, "_launch_to_browser", False):
-            self.query_one(BrowserLauncher).open_folder(qa_path, sub_path)
+            self._open_folder_in_browser(qa_path, sub_path)
             return
         from opengrader.core.workspace.folder_session import shared_workspace_for
 
@@ -3216,7 +3304,7 @@ class SetupScreen(OutlineButtons, Vertical):
 
         if getattr(self, "_launch_to_browser", False):
             wait = "The browser opens when it finishes."
-        elif self.query_one("#pipe-grade-asap", Checkbox).value:
+        elif self._remembered_grade_as_ready():
             wait = "Grading opens as soon as the first submission is ready."
         else:
             wait = "Grading opens when it finishes."
@@ -3473,7 +3561,7 @@ class SetupScreen(OutlineButtons, Vertical):
             submissions.name != "submissions"
             or getattr(self, "extraction_in_progress", False)
             or str(folder) in declined
-            or not self._ai().auto_grade
+            or not self.query_one("#pipe-auto-grade", Checkbox).value
             or not auto_grade_pending(folder)
         ):
             return False
@@ -3895,7 +3983,7 @@ class SetupScreen(OutlineButtons, Vertical):
             reorder_pages=self.query_one("#pipe-reorder", Checkbox).value,
             llm=llm,
             jobs=jobs,
-            auto_grade=current.auto_grade,
+            auto_grade=self.query_one("#pipe-auto-grade", Checkbox).value,
             force=self.query_one("#pipe-force", Checkbox).value,
             fresh=self.query_one("#pipe-fresh", Checkbox).value,
             read_without_key=self.query_one("#pipe-no-key", Checkbox).value,
@@ -3947,19 +4035,364 @@ class SetupScreen(OutlineButtons, Vertical):
         self.query_one("#pipe-preview-details", Static).update("\n".join(details))
         self.query_one("#pipe-preview-output").remove_class("hidden")
 
+    # -- What auto-grading leaves, and the AI that can help ---------------------
+
+    _KEY_SCORES = (
+        "The answer key scores multiple choice, true/false, numbers and "
+        "answers that match it exactly."
+    )
+    _KEY_CANNOT = (
+        "short answers and fill-in-the-blank that don't match the key "
+        "exactly, partly right select-all, explanations"
+    )
+
+    def _auto_grade_ai_text(self) -> tuple[str, bool]:
+        """The line under "Auto-grade after reading the scans", and whether
+        AI could still do more for it (the Get help from AI button)."""
+        current = self._ai()
+        if current.grade_written and current.read_handwriting:
+            return (
+                f"{self._KEY_SCORES} AI reads the handwriting and suggests a "
+                f"grade, for you to confirm, for the rest ({self._KEY_CANNOT}).",
+                False,
+            )
+        if current.grade_written:
+            return (
+                f"{self._KEY_SCORES} AI suggests grades for the rest "
+                f"({self._KEY_CANNOT}). But without an AI reader, handwritten "
+                "answers are usually not read at all, so there is little to "
+                "grade; turn on handwriting reading, or use your AI assistant.",
+                True,
+            )
+        reading = (
+            "AI reads the handwriting. "
+            if current.read_handwriting
+            else "Without an AI reader, handwritten answers are usually not "
+            "read at all, so even multiple choice is left for you. "
+        )
+        return (
+            f"{self._KEY_SCORES} {reading}Everything else ({self._KEY_CANNOT}) "
+            "is left for you; an AI can draft those grades.",
+            True,
+        )
+
+    def _refresh_auto_grade_ai(self) -> None:
+        ticked = self.query_one("#pipe-auto-grade", Checkbox).value
+        self.query_one("#pipe-auto-grade-ai-area").set_class(not ticked, "hidden")
+        if not ticked:
+            return
+        text, can_help = self._auto_grade_ai_text()
+        self.query_one("#pipe-auto-grade-ai", Static).update(text)
+        self.query_one("#pipe-ai-help", Button).display = can_help
+
+    def _offer_ai_help(
+        self,
+        *,
+        title: str = "Get help from AI",
+        found: str = "",
+        folder: Path | None = None,
+        then=None,  # noqa: ANN001 - Callable[[], None] | None, run whatever the answer
+    ) -> None:
+        """The two ways an AI helps with what auto-grading leaves: your own AI
+        assistant on a redacted copy, or a model set up in AI setup."""
+        note = (
+            "Use my AI assistant: the app you already use (Claude, ChatGPT, "
+            "Codex…) gets a copy of the answers with names and IDs taken out. "
+            "It reads each handwritten answer into the submission's response "
+            "text and suggests a grade; you merge its work back and confirm "
+            "it. Nothing runs until you start it.\n"
+            "AI setup: a local model or a cloud service reads the handwriting "
+            "and suggests grades while the pipeline runs. Run the pipeline "
+            "again afterwards to apply it to folders already read."
+        )
+
+        if then is None and self._ai_help_choice() != AI_HELP_ASK:
+            # The button, answered for good under Settings: no question.
+            self._get_ai_help(self._ai_help_choice(), folder)
+            return
+
+        def answered(action: str | None) -> None:
+            if action is not None and dialog.remembered:
+                self._set_ai_help_choice(action)
+                self._save_ai_help_choice()
+            # Grading opens either way; an AI choice opens on top of it.
+            if then is not None:
+                then()
+            self._get_ai_help(action, folder)
+
+        dialog = PrepareFolderScreen(
+            title,
+            found or self._auto_grade_ai_text()[0],
+            note + (
+                "\nA remembered choice can be changed under Settings → Get "
+                "help from AI."
+            ),
+            [(AI_HELP_AI_SETUP, "AI setup…"), (AI_HELP_ASSISTANT, "Use my AI assistant…")],
+            cancel_label="Not now",
+            remember="Remember my choice and don't ask again",
+        )
+        self.app.push_screen(dialog, answered)
+
+    def _get_ai_help(self, action: str | None, folder: Path | None) -> None:
+        if action == AI_HELP_ASSISTANT:
+            self._open_assistant_for(folder)
+        elif action == AI_HELP_AI_SETUP:
+            self._open_ai_settings()
+
+    def _ai_help_choice(self) -> str:
+        """Settings' "Get help from AI": AI_HELP_ASK, or the remembered answer.
+        Kept here, not read off the buttons (see `_run_choice`)."""
+        return getattr(self, "_ai_help_value", AI_HELP_ASK)
+
+    def _set_ai_help_choice(self, choice: str) -> None:
+        if choice not in AI_HELP_CHOICES:
+            choice = AI_HELP_ASK
+        self._ai_help_value = choice
+        self.query_one(f"#{_ai_help_id(choice)}", RadioButton).value = True
+
+    def _save_ai_help_choice(self) -> None:
+        """Saved as soon as it is chosen: it can be chosen after a run, with no
+        run to come that would save it with the card."""
+        try:
+            saved = load_machine_settings()
+            if saved.ai_help_choice != self._ai_help_choice():
+                save_machine_settings(replace(saved, ai_help_choice=self._ai_help_choice()))
+        except OSError as exc:
+            self.app.notify(f"Could not remember that choice: {exc}", severity="warning")
+
+    @on(RadioSet.Changed, "#pipe-ai-help-choice")
+    def _on_ai_help_choice_changed(self, event: RadioSet.Changed) -> None:
+        for choice, _label in _AI_HELP_LABELS:
+            if event.pressed.id == _ai_help_id(choice):
+                self._ai_help_value = choice
+        # A programmatic press (restoring the saved one) saves nothing new.
+        self._save_ai_help_choice()
+
+    def _open_assistant_for(self, folder: Path | None, *, after_run: bool = False) -> None:
+        """The AI assistant card on this class folder: straight to grading
+        when it has read submissions, else the card, which says what is next."""
+        target = folder or (
+            Path(self._clean_path(self.query_one("#pipe-out", Input).value))
+            if self._clean_path(self.query_one("#pipe-out", Input).value)
+            else None
+        )
+        if target is not None:
+            self.query_one("#assistant-folder", Input).value = str(target)
+        state = self._assistant_state()
+        running = getattr(self, "extraction_in_progress", False)
+        if state is not None and state.can_grade and not running:
+            self._open_assistant()
+            return
+        if after_run:
+            # The run is over and still nothing it can work on: say why there.
+            section = self.query_one("#section-assistant", Collapsible)
+            section.collapsed = False
+            self._refresh_assistant_card()
+            section.scroll_visible()
+            self.app.notify(
+                "Your AI assistant needs an answer key and read submissions; "
+                "the AI assistant card says what this folder still lacks.",
+                severity="warning",
+                timeout=10,
+            )
+            return
+        # It works on answers that are already read: once the run is over.
+        self._assistant_after_run = True
+        self.app.notify(
+            "Your AI assistant's make-a-copy screen opens when the pipeline "
+            "finishes"
+            + ("." if running else " — press Run Pipeline."),
+            timeout=10,
+        )
+
+    def _after_run_ai(self, report: PipelineReport, then) -> bool:  # noqa: ANN001
+        """What a finished run hands to an AI: the assistant's copy screen when
+        it was asked for (this session, or for good under Settings), else the
+        one-time offer. True when `then` (opening grading) was taken over."""
+        armed = getattr(self, "_assistant_after_run", False)
+        self._assistant_after_run = False
+        choice = self._ai_help_choice()
+        remembered = (
+            choice == AI_HELP_ASSISTANT
+            and self.query_one("#pipe-auto-grade", Checkbox).value
+        )
+        if armed or remembered:
+            if then is not None:
+                then()
+            from opengrader.core.grading.automated import grading_coverage
+
+            try:
+                left = grading_coverage(report.submissions_dir).left
+            except OSError:
+                left = 1
+            if left:
+                self._open_assistant_for(report.submissions_dir.parent, after_run=True)
+            else:
+                self.app.notify("Everything is graded — nothing left for your AI assistant.")
+            return then is not None
+        if choice == AI_HELP_AI_SETUP:
+            return False
+        return self._offer_ai_help_once(report, then)
+
+    def _offer_ai_help_once(self, report: PipelineReport, then) -> bool:  # noqa: ANN001
+        """After the first auto-graded run on this computer that left answers
+        for a person, while no AI grades them: say how many, once. True when
+        shown (`then` runs once it is answered, so grading still opens)."""
+        auto_graded = any(
+            outcome.stage == STAGE_AUTO_GRADE and outcome.status is StageStatus.RAN
+            for outcome in report.stages
+        )
+        if not auto_graded or self._ai().grade_written:
+            return False
+        from opengrader.core.grading.automated import grading_coverage
+
+        try:
+            saved = load_machine_settings()
+            if saved.ai_help_offered:
+                return False
+            coverage = grading_coverage(report.submissions_dir)
+            if coverage.total == 0 or coverage.left == 0:
+                return False
+            save_machine_settings(replace(saved, ai_help_offered=True))
+        except OSError:
+            return False
+        lines = [
+            f"Auto-graded {coverage.scored} of {coverage.total} answers. "
+            f"{coverage.left} are left for you."
+        ]
+        if coverage.unread:
+            lines.append(
+                f"{coverage.unread} of them were not read off the page at all, "
+                "so the key had nothing to score — not even multiple choice. "
+                "Handwriting needs an AI reader: it fills in each answer's "
+                "response text, and then the key scores what it can."
+            )
+        if coverage.left > coverage.unread:
+            lines.append(
+                f"{coverage.left - coverage.unread} were read but the key "
+                f"can't settle them by itself ({self._KEY_CANNOT}); an AI "
+                "can draft grades for those, for you to confirm."
+            )
+        lines.append(
+            "(Shown once. Get help from AI, under Settings on the Prepare an "
+            "assignment card, offers this again.)"
+        )
+        self._offer_ai_help(
+            title="Auto-grading is done",
+            found="\n".join(lines),
+            folder=report.submissions_dir.parent,
+            then=then,
+        )
+        return True
+
+    def _remembered_grade_as_ready(self) -> bool:
+        """The last "grade as soon as I can / after it finishes" answer."""
+        return getattr(self, "_grade_as_ready", True)
+
+    def _run_choice(self) -> str:
+        """Settings' "When Run Pipeline is pressed": RUN_ASK, or the answer.
+
+        Kept here rather than read off the buttons: the RadioSet lets go of
+        the old button a message later, so straight after a press two are on.
+        """
+        return getattr(self, "_run_choice_value", RUN_ASK)
+
+    def _set_run_choice(self, choice: str) -> None:
+        if choice not in RUN_CHOICES:
+            choice = RUN_ASK
+        self._run_choice_value = choice
+        # Press only the chosen one: the RadioSet lets go of the others itself.
+        self.query_one(f"#{_run_choice_id(choice)}", RadioButton).value = True
+
+    @on(RadioSet.Changed, "#pipe-run-choice")
+    def _on_run_choice_changed(self, event: RadioSet.Changed) -> None:
+        for choice, _label in _RUN_CHOICE_LABELS:
+            if event.pressed.id == _run_choice_id(choice):
+                self._run_choice_value = choice
+
+    def _run_as(self, action: str | None) -> None:
+        """Run the card the way Run Pipeline's question was answered."""
+        if action == _RUN_GRADE_ASAP:
+            self._grade_as_ready = True
+            self._run_pipeline(grade_as_ready=True)
+        elif action == _RUN_GRADE_AT_END:
+            self._grade_as_ready = False
+            self._run_pipeline(grade_as_ready=False)
+        elif action == _RUN_ONLY:
+            self._run_pipeline(open_when_done=False)
+
+    def _ask_how_to_run(self) -> None:
+        """Run Pipeline: ask whether grading opens as submissions arrive,
+        when the run finishes, or not at all — unless that was answered for
+        good (Settings → When Run Pipeline is pressed). Without an answer key
+        grading cannot open, so there is nothing to ask."""
+        request = self._build_pipeline_request()
+        if request is None:
+            return
+        if request.qa_file is None:
+            self._run_pipeline()
+            return
+        saved = self._run_choice()
+        if saved != RUN_ASK:
+            label = dict(_RUN_CHOICE_LABELS)[saved]
+            self.app.notify(
+                f"{label} — as chosen under Settings → When Run Pipeline is "
+                "pressed. Pick Ask every time there to be asked again.",
+                timeout=8,
+            )
+            self._run_as(saved)
+            return
+
+        def answered(action: str | None) -> None:
+            if action is not None and dialog.remembered:
+                # Saved with the card's other settings when the run starts.
+                self._set_run_choice(action)
+            self._run_as(action)
+
+        asap_choice = (_RUN_GRADE_ASAP, "Grade as they arrive")
+        end_choice = (_RUN_GRADE_AT_END, "Grade when it finishes")
+        # The last button is the suggested one: the answer given last time.
+        choices = [(_RUN_ONLY, "Just run it")] + (
+            [end_choice, asap_choice]
+            if self._remembered_grade_as_ready()
+            else [asap_choice, end_choice]
+        )
+        auto = (
+            "auto-graded, then "
+            if self.query_one("#pipe-auto-grade", Checkbox).value
+            else ""
+        )
+        dialog = PrepareFolderScreen(
+            "Run the pipeline",
+            f"Folder: {request.output_dir}\n"
+            f"Answer key: {request.qa_file.name}",
+            f"The scans are checked, split, read, {auto}ready to grade. "
+            "Grade as they arrive: grading opens the moment the first "
+            "submission is ready, while the rest are read behind it. "
+            "Grade when it finishes: grading opens once every paper is "
+            "done. Just run it: prepares the folder and opens nothing; "
+            "press Launch Grading later. A remembered choice can be changed "
+            "under Settings → When Run Pipeline is pressed.",
+            choices,
+            remember="Remember my choice and don't ask again",
+        )
+        self.app.push_screen(dialog, answered)
+
     def _run_pipeline(
         self,
         *,
         from_launch: bool = False,
         grade_as_ready: bool | None = None,
         offer_draft: bool = True,
+        open_when_done: bool = True,
     ) -> None:
         """Run the card as it stands.
 
         `from_launch` is a run the Start grading card asked for: its progress
-        is shown on that card too. `grade_as_ready` overrides the card's
-        "Start grading as submissions arrive" for this one run. `offer_draft`
+        is shown on that card too. `grade_as_ready` overrides the remembered
+        "grade as submissions arrive" answer for this one run. `offer_draft`
         off is a run whose answer-key question was already asked.
+        `open_when_done` off only prepares the folder: grading never opens.
         """
         request = self._build_pipeline_request()
         if request is None:
@@ -3985,9 +4418,13 @@ class SetupScreen(OutlineButtons, Vertical):
 
         self._save_pipeline_settings(request)
 
-        asap = self.query_one("#pipe-grade-asap", Checkbox).value
+        asap = self._remembered_grade_as_ready()
         if grade_as_ready is not None:
             asap = grade_as_ready
+        # Kept for the run's re-starts after a question (cloud send, split).
+        self._pipe_open_when_done = open_when_done
+        if not open_when_done:
+            asap = False
         # Where this run opens the folder when it is ready. The browser app
         # is given finished work: it opens once, at the end.
         self._pipe_to_browser = from_launch and getattr(self, "_launch_to_browser", False)
@@ -4002,7 +4439,6 @@ class SetupScreen(OutlineButtons, Vertical):
             )
 
         self._pipe_log_lines: list[str] = []
-        self._pipe_total = 0
         self._pipe_steps = self._pipeline_steps(request)
         self._pipe_step = ""
         self._pipe_from_launch = from_launch
@@ -4017,7 +4453,8 @@ class SetupScreen(OutlineButtons, Vertical):
         """Start the worker — also after a question the run stopped to ask
         (the cloud send, the page order), where the same request runs again."""
         self.query_one("#pipe-progress").remove_class("hidden")
-        self.query_one("#launch-progress-bar").remove_class("hidden")
+        for bar in self._pipe_bars():
+            bar.remove_class("hidden")
         self._pipe_status("Starting…")
         self.query_one("#pipe-run", Button).disabled = True
         self.query_one("#pipe-preview", Button).disabled = True
@@ -4093,12 +4530,16 @@ class SetupScreen(OutlineButtons, Vertical):
         def on_response(name: str, item: str) -> None:
             app.call_from_thread(self._pipe_response, name, item)
 
+        def on_count(done: int, total: int) -> None:
+            app.call_from_thread(self._pipe_count, done, total)
+
         progress = PipelineProgress(
             on_stage_start=on_stage_start,
             on_stage_finish=on_stage_finish,
             on_status=on_status,
             on_file_start=on_file_start,
             on_response=on_response,
+            on_count=on_count,
         )
 
         try:
@@ -4120,6 +4561,10 @@ class SetupScreen(OutlineButtons, Vertical):
             f"Step {steps.index(stage) + 1} of {len(steps)} · "
             f"{_PIPE_STAGE_LABELS.get(stage, stage)}"
         )
+        # Each step starts its own bar: a stage that counts nothing pulses,
+        # one that does fills by its own total, so its time left holds.
+        for bar in self._pipe_bars():
+            bar.update(total=None, progress=0)
         self._pipe_status(f"{self._pipe_step}…")
 
     def _pipe_stage_finish(self, outcome: StageOutcome) -> None:
@@ -4137,15 +4582,18 @@ class SetupScreen(OutlineButtons, Vertical):
         self._pipe_detail(message.strip())
 
     def _pipe_file_start(self, name: str, count: int) -> None:
-        self._pipe_total = getattr(self, "_pipe_total", 0) + count
-        for bar in self._pipe_bars():
-            bar.update(total=self._pipe_total)
-        self._pipe_detail(f"{name} ({count})")
+        # What is being worked on; the bar moves by `_pipe_count` only.
+        self._pipe_detail(name)
 
     def _pipe_response(self, name: str, item: str) -> None:
-        for bar in self._pipe_bars():
-            bar.advance(1)
         self._pipe_detail(f"{name} · {item}")
+
+    def _pipe_count(self, done: int, total: int) -> None:
+        """`done` of the current step's `total` (PDFs read, papers graded)."""
+        if total <= 0:
+            return
+        for bar in self._pipe_bars():
+            bar.update(total=total, progress=min(done, total))
 
     def _pipe_launch_early(self, qa_path: str, submissions_path: str) -> None:
         self.app.notify(
@@ -4157,15 +4605,35 @@ class SetupScreen(OutlineButtons, Vertical):
     def _pipe_open(self, qa_path: str, sub_path: str) -> None:
         """Open what a finished run prepared, where that run was asked to."""
         if getattr(self, "_pipe_to_browser", False):
-            self.query_one(BrowserLauncher).open_folder(qa_path, sub_path)
+            self._open_folder_in_browser(qa_path, sub_path)
         else:
             self.post_message(self.LaunchRequested(qa_path, sub_path))
+
+    def _open_folder_in_browser(self, qa_path: str, sub_path: str) -> None:
+        """The browser app on this folder: on the papers that need a student
+        when some are not matched to the roster, else the assignment."""
+        from opengrader.core.submissions.roster_check import folder_roster_coverage
+
+        try:
+            coverage = folder_roster_coverage(sub_path, qa_path)
+        except Exception:  # noqa: BLE001 - a check, never in the way of opening
+            coverage = None
+        page = ""
+        if coverage is not None and coverage.count:
+            page = "submissions?show=attention"
+            self.app.notify(
+                f"{coverage.summary()} The browser opens on them; pick each "
+                "paper's student there.",
+                timeout=12,
+            )
+        self.query_one(BrowserLauncher).open_folder(qa_path, sub_path, page=page)
 
     def _pipe_reset_buttons(self) -> None:
         self.query_one("#pipe-run", Button).disabled = False
         self.query_one("#pipe-preview", Button).disabled = False
-        # Start grading keeps the last status line, without a bar still moving.
-        self.query_one("#launch-progress-bar").add_class("hidden")
+        # Both cards keep the last status line, without a bar still moving.
+        for bar in self._pipe_bars():
+            bar.add_class("hidden")
         self.extraction_in_progress = False
 
     def _pipe_stopped_short(self) -> None:
@@ -4258,25 +4726,56 @@ class SetupScreen(OutlineButtons, Vertical):
                 "grade with them.",
                 timeout=12,
             )
-            if not launched_early and report.ready_to_grade and qa_path:
+            if (
+                not launched_early
+                and report.ready_to_grade
+                and qa_path
+                and getattr(self, "_pipe_open_when_done", True)
+            ):
                 self._pipe_open(qa_path, str(report.submissions_dir))
             return
 
         if launched_early:
             self.query_one("#launch-progress").add_class("hidden")
+            self._pipe_status(self._pipe_done_line(report))
             self.app.notify(
                 f"Pipeline finished — {report.submission_count} submission(s) "
                 f"in {report.submissions_dir}."
             )
+            # Grading opened before every paper was read, so the roster
+            # check waited until now.
+            offer = getattr(self.app, "offer_roster_matching", None)
+            if callable(offer):
+                offer()
+            self._after_run_ai(report, None)
+            return
+
+        if report.ready_to_grade and qa_path and not getattr(
+            self, "_pipe_open_when_done", True
+        ):
+            self._pipe_status(
+                f"{self._pipe_done_line(report)} Press Launch Grading on "
+                "Start grading when you want to grade them."
+            )
+            self.app.notify(
+                f"Pipeline finished — {report.submission_count} submission(s) "
+                "ready. Grading was not opened, as asked."
+            )
+            self._after_run_ai(report, None)
             return
 
         if report.ready_to_grade and qa_path:
             self.query_one("#launch-progress").add_class("hidden")
+            self._pipe_status(self._pipe_done_line(report))
             self.app.notify(
                 f"{report.submission_count} submission(s) ready — opening "
                 + ("the browser." if getattr(self, "_pipe_to_browser", False) else "the grading workspace.")
             )
-            self._pipe_open(qa_path, str(report.submissions_dir))
+            sub_path = str(report.submissions_dir)
+            if not self._after_run_ai(
+                report, lambda: self._pipe_open(qa_path, sub_path)
+            ):
+                self._pipe_open(qa_path, sub_path)
             return
 
         if report.ready_to_grade:
@@ -4291,9 +4790,23 @@ class SetupScreen(OutlineButtons, Vertical):
             )
             return
 
+        self._pipe_status("Finished, but no submissions were produced.")
         self.app.notify(
             "Pipeline finished, but no submissions were produced.",
             severity="warning",
+        )
+
+    @staticmethod
+    def _pipe_done_line(report: PipelineReport) -> str:
+        """The status line a finished run leaves on both cards."""
+        graded = any(
+            outcome.stage == STAGE_AUTO_GRADE
+            and outcome.status in (StageStatus.RAN, StageStatus.REUSED)
+            for outcome in report.stages
+        )
+        return (
+            f"Done — {report.submission_count} submission(s) ready"
+            + (", auto-graded." if graded else ".")
         )
 
     @staticmethod

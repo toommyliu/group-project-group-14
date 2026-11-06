@@ -1271,3 +1271,41 @@ def test_the_split_question_shows_whether_the_scan_divides_evenly(tmp_path) -> N
     # Already cut every N pages, or nothing says how long a paper is: nothing to ask.
     assert split_question(replace(even, fixed_split=True)) is None
     assert split_question(replace(even, blank_template=None)) is None
+
+
+def test_each_stage_counts_its_own_work_against_a_total_that_stays_put(
+    tmp_path, monkeypatch, stages, clean_scan
+) -> None:
+    """The TUI's bar shows a percentage and time left from these: a total that
+    changed every file (it used to grow by the class size per file during
+    auto-grading) reset the time left and kept the percentage near zero."""
+    from opengrader.core.pipeline import PipelineProgress
+
+    def extract(argv, *, progress=None, **kwargs):  # noqa: ANN001, ANN202
+        stages.extract(argv, progress=progress, **kwargs)
+        for done in range(stages.split_count + 1):
+            progress.files_done(done, stages.split_count)
+
+    def grade(argv, *, progress=None, **kwargs):  # noqa: ANN001, ANN202
+        stages.grade(argv, progress=progress, **kwargs)
+        for index in range(1, 4):
+            progress.file_start(f"s{index}.submission.md", index, 3)
+
+    monkeypatch.setattr(submission_extractor, "run_cli", extract)
+    monkeypatch.setattr(automated_grading, "run_cli", grade)
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    counts: list[tuple[str, int, int]] = []
+    current = {"stage": ""}
+    progress = PipelineProgress(
+        on_stage_start=lambda stage: current.update(stage=stage),
+        on_count=lambda done, total: counts.append((current["stage"], done, total)),
+    )
+
+    run_pipeline(_request(tmp_path, qa_file=qa), progress=progress)
+
+    extracted = [(done, total) for stage, done, total in counts if stage == STAGE_EXTRACT]
+    graded = [(done, total) for stage, done, total in counts if stage == STAGE_AUTO_GRADE]
+    n = stages.split_count
+    assert extracted == [(done, n) for done in range(n + 1)]
+    assert graded == [(0, 3), (1, 3), (2, 3), (3, 3)]

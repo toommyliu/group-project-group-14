@@ -3,6 +3,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import queue as queue_module
+import sys
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -422,6 +423,35 @@ def _init_worker(render_cache_bytes: int, ai_calls_in_flight: int = 1) -> None:
 _MIN_WORKER_RENDER_CACHE_BYTES = 64 * 1024 * 1024
 
 
+def _ensure_resource_tracker() -> None:
+    """Start multiprocessing's resource tracker while stderr is a real file.
+
+    The first spawn starts the tracker and hands it ``sys.stderr.fileno()``.
+    Inside a Textual app (classic's pipeline card, Launch Grading) stderr is
+    Textual's print capture, whose ``fileno()`` is -1, and ``fork_exec``
+    refuses it: ``ValueError: bad value(s) in fds_to_keep`` before a single
+    worker starts. Started once here with stderr on /dev/null (so its
+    warnings never draw over the app), the tracker is reused by every later
+    spawn in this process.
+    """
+    if os.name != "posix":
+        return
+    try:
+        if sys.stderr.fileno() >= 0:
+            return
+    except Exception:  # noqa: BLE001 — the tracker skips an unusable stderr itself
+        return
+    from multiprocessing import resource_tracker
+
+    saved = sys.stderr
+    with open(os.devnull, "w") as sink:
+        sys.stderr = sink
+        try:
+            resource_tracker.ensure_running()
+        finally:
+            sys.stderr = saved
+
+
 def _run_parallel(
     jobs: Sequence[ExtractionJob],
     *,
@@ -432,6 +462,7 @@ def _run_parallel(
     fail_fast: bool,
 ) -> BatchReport:
     context = multiprocessing.get_context("spawn")
+    _ensure_resource_tracker()
     # Pool arguments must be picklable; raw queues require process inheritance.
     manager = context.Manager()
     stop = threading.Event()

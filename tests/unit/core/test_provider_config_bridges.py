@@ -155,7 +155,6 @@ class TestWithOverrides:
             escalate_only=True,
             transcribe_math=True,
             grade_written=True,
-            auto_grade=False,
             require_calibration=True,
         )
         resolved = app_config.resolve(
@@ -176,7 +175,6 @@ class TestWithOverrides:
         assert overridden.escalate_only == resolved.escalate_only
         assert overridden.transcribe_math == resolved.transcribe_math
         assert overridden.grade_written == resolved.grade_written
-        assert overridden.auto_grade == resolved.auto_grade
         assert overridden.require_calibration == resolved.require_calibration
 
     def test_values_are_stripped(self, fake_provider_registry) -> None:

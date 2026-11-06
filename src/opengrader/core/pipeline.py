@@ -325,6 +325,9 @@ class PipelineProgress:
     on_status: Callable[[str], None] | None = None
     on_file_start: Callable[[str, int], None] | None = None
     on_response: Callable[[str, str], None] | None = None
+    # (done, total) units of the current stage — PDFs read, submissions
+    # graded. Its total stays put for the stage, so a bar's time left holds.
+    on_count: Callable[[int, int], None] | None = None
 
     def stage_start(self, stage: str) -> None:
         if self.on_stage_start is not None:
@@ -345,6 +348,10 @@ class PipelineProgress:
     def response(self, name: str, item: str) -> None:
         if self.on_response is not None:
             self.on_response(name, item)
+
+    def count(self, done: int, total: int) -> None:
+        if self.on_count is not None:
+            self.on_count(done, total)
 
 
 def section_slug(section: str) -> str:
@@ -1204,6 +1211,7 @@ def _run_extract(
         progress=ExtractionProgress(
             on_file_start=progress.on_file_start,
             on_response=progress.on_response,
+            on_files_done=progress.on_count,
         ),
         status_callback=progress.status,
     )
@@ -1491,18 +1499,23 @@ def _run_auto_grade(
             progress.status(f"{reason}. Grading without AI: only exact matches with the key are scored.")
 
     source, settings_id = _stage_ledger_key(request, plan.stage)
+    graded = {"total": 0}
+
+    def file_start(name: str, index: int, total: int) -> None:
+        graded["total"] = total
+        progress.count(index - 1, total)
+        progress.file_start(name, total)
+
     automated_grading.run_cli(
         list(plan.argv[1:]),
         progress=automated_grading.GradingProgress(
-            on_file_start=(
-                (lambda name, index, total: progress.file_start(name, total))
-                if progress.on_file_start is not None
-                else None
-            ),
+            on_file_start=file_start,
             on_question=progress.on_response,
         ),
         status_callback=progress.status,
     )
+    if graded["total"]:
+        progress.count(graded["total"], graded["total"])
 
     outputs = sorted(request.submissions_dir.rglob("*.submission.md"))
     duration = time.monotonic() - started

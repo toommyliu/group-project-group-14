@@ -1,6 +1,7 @@
 """Present service records to the TUI and preserve unacknowledged edits."""
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -30,6 +31,9 @@ from opengrader.core.analytics.score_statistics import (
     QuestionStatistics,
     statistics_from_scores,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from opengrader.core.submissions.roster_check import RosterCoverage
 
 
 class WorkspaceProvider:
@@ -173,6 +177,41 @@ class WorkspaceProvider:
 
     def invalidate_summaries(self) -> None:
         self._submissions = None
+
+    def roster_coverage(self) -> "RosterCoverage | None":
+        """How many papers are not matched to the workspace's roster; None
+        when it has no roster or this account may not read it (a grader)."""
+        from opengrader.core.roster import RosterStudent
+        from opengrader.core.submissions.roster_check import (
+            RosterCoverage,
+            is_unmatched,
+            roster_ids,
+        )
+        from opengrader.core.workspace.models import Student
+
+        try:
+            students = TypeAdapter(list[Student]).validate_json(
+                self.client.request("GET", "/api/roster")
+            )
+            submissions = self._submission_summaries()
+        except (ServiceError, ValueError):
+            return None
+        ids = roster_ids(RosterStudent(student.sid, student.name) for student in students)
+        if not ids or not submissions:
+            return None
+        count = sum(
+            1
+            for item in submissions
+            if not item.student_name.strip() or is_unmatched(item.student_id, ids)
+        )
+        return RosterCoverage(len(submissions), count)
+
+    def match_page_url(self) -> str:
+        """This assignment's Submissions page, on the papers needing a person."""
+        return (
+            f"{self.client.connection.url}/assignments/"
+            f"{quote(self.assignment.id, safe='')}/submissions?show=attention"
+        )
 
     def _submission_summaries(self) -> list[Submission]:
         if self._submissions is None:

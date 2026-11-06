@@ -96,6 +96,19 @@ def test_machine_settings_default_when_nothing_is_saved() -> None:
     )
 
 
+def test_auto_grading_is_opt_in_and_stays_on_once_ticked() -> None:
+    import json
+
+    assert load_machine_settings().auto_grade is False
+    save_machine_settings(MachinePipelineSettings(auto_grade=True))
+    assert load_machine_settings().auto_grade is True
+    # Anything but an explicit true is off.
+    machine_settings_path().write_text(
+        json.dumps({"version": 1, "auto_grade": "yes"}), encoding="utf-8"
+    )
+    assert load_machine_settings().auto_grade is False
+
+
 def test_machine_settings_round_trip_beside_the_ai_settings() -> None:
     from opengrader.core import app_config
 
@@ -160,3 +173,31 @@ def test_a_split_choice_leaves_the_other_saved_settings_alone(tmp_path) -> None:
     assert saved is not None
     assert (saved.pages_per_submission, saved.use_roster, saved.fixed_split) == (6, True, True)
     assert load_split_choice(tmp_path) is True
+
+
+def test_a_remembered_run_choice_round_trips_and_a_bad_one_means_ask() -> None:
+    import json
+
+    from opengrader.core.pipeline_settings import RUN_ASK, RUN_ONLY
+
+    assert load_machine_settings().run_choice == RUN_ASK
+    save_machine_settings(MachinePipelineSettings(run_choice=RUN_ONLY))
+    assert load_machine_settings().run_choice == RUN_ONLY
+    machine_settings_path().write_text(
+        json.dumps({"version": 1, "run_choice": "explode"}), encoding="utf-8"
+    )
+    assert load_machine_settings().run_choice == RUN_ASK
+
+
+def test_a_remembered_ai_help_choice_round_trips_and_a_bad_one_means_ask() -> None:
+    import json
+
+    from opengrader.core.pipeline_settings import AI_HELP_ASK, AI_HELP_ASSISTANT
+
+    assert load_machine_settings().ai_help_choice == AI_HELP_ASK
+    save_machine_settings(MachinePipelineSettings(ai_help_choice=AI_HELP_ASSISTANT))
+    assert load_machine_settings().ai_help_choice == AI_HELP_ASSISTANT
+    machine_settings_path().write_text(
+        json.dumps({"version": 1, "ai_help_choice": "robot"}), encoding="utf-8"
+    )
+    assert load_machine_settings().ai_help_choice == AI_HELP_ASK

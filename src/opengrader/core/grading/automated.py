@@ -411,3 +411,39 @@ def _suggest_or_warn(
     except LLMError as exc:
         print(f"  LLM grading failed for {question_id}: {exc}", file=sys.stderr)
         return None
+
+
+@dataclass(frozen=True)
+class GradingCoverage:
+    """How much of a folder auto-grading scored, and why the rest is left."""
+
+    scored: int
+    total: int
+    # No response text: nothing was read off the page (handwriting with no
+    # AI reader, usually), so not even multiple choice can be scored.
+    unread: int
+
+    @property
+    def left(self) -> int:
+        return self.total - self.scored
+
+
+def grading_coverage(submissions_dir: str | Path) -> GradingCoverage:
+    """Every answer across a folder's submissions: scored, or left for a
+    person and whether it was read at all. An unreadable file counts for
+    nothing."""
+    scored = total = unread = 0
+    for path in sorted(Path(submissions_dir).rglob("*.submission.md")):
+        if path.name.startswith("._"):
+            continue
+        try:
+            document = load_student_submission_markdown(path)
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+        for question in document.questions:
+            total += 1
+            if question.points_awarded is not None:
+                scored += 1
+            elif not (question.response_text or "").strip():
+                unread += 1
+    return GradingCoverage(scored=scored, total=total, unread=unread)

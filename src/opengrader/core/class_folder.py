@@ -143,8 +143,9 @@ def scan_class_folder(folder: str | Path) -> ClassFolderScan:
         ):
             notes.append(
                 f"{path.name} looks like a roster, but a .csv roster needs a "
-                "first row naming First Name, Last Name and SID — add it, or "
-                "save the file tab-separated (ID<TAB>NAME) as .tsv"
+                "first row naming First Name, Last Name and SID (or a Canvas "
+                "export's Student and SIS User ID) — add it, or save the file "
+                "tab-separated (ID<TAB>NAME) as .tsv"
             )
 
     templates: list[Path] = []
